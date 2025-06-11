@@ -549,12 +549,27 @@ void addHs(RWMol &mol, const AddHsParameters &params,
   } else {
     onAtoms.set();
   }
+  std::vector<unsigned int> numExplicitHs(mol.getNumAtoms(), 0);
+  std::vector<unsigned int> numImplicitHs(mol.getNumAtoms(), 0);
+
+  // Ensure all atoms have implicit valence calculated (e.g., after unpickling)
+  // If noImplicit is false, the atom may need implicit valence calculated
+  // Skip query atoms (or atoms connected to query bonds) as they are handled separately
   for (auto at : mol.atoms()) {
+    if (!at->getNoImplicit() && !isQueryAtom(mol, *at)) {
+      at->updatePropertyCache(false);
+    }
+  }
+
+  for (auto at : mol.atoms()) {
+    numExplicitHs[at->getIdx()] = at->getNumExplicitHs();
+    numImplicitHs[at->getIdx()] = at->getNumImplicitHs();
     if (onAtoms[at->getIdx()]) {
       if (params.skipQueries && isQueryAtom(mol, *at)) {
         onAtoms.set(at->getIdx(), 0);
         continue;
       }
+      
       numAddHyds += at->getNumExplicitHs();
       if (!params.explicitOnly) {
         numAddHyds += at->getNumImplicitHs();
@@ -586,7 +601,7 @@ void addHs(RWMol &mol, const AddHsParameters &params,
     unsigned int newIdx;
     newAt->clearComputedProps();
     // always convert explicit Hs
-    unsigned int onumexpl = newAt->getNumExplicitHs();
+    unsigned int onumexpl = numExplicitHs[aidx];
     for (unsigned int i = 0; i < onumexpl; i++) {
       newIdx = mol.addAtom(new Atom(1), false, true);
       mol.addBond(aidx, newIdx, Bond::SINGLE);
@@ -605,8 +620,7 @@ void addHs(RWMol &mol, const AddHsParameters &params,
 
     if (!params.explicitOnly) {
       // take care of implicits
-      for (unsigned int i = 0; i < mol.getAtomWithIdx(aidx)->getNumImplicitHs();
-           i++) {
+      for (unsigned int i = 0; i < mol.getAtomWithIdx(aidx)->getNumImplicitHs(); i++) {
         newIdx = mol.addAtom(new Atom(1), false, true);
         mol.addBond(aidx, newIdx, Bond::SINGLE);
         // set the isImplicit label so that we can strip these back
