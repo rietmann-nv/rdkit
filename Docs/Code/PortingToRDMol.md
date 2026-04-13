@@ -248,8 +248,67 @@ copying. For faster comparison, it also caches a hash of the string.
 
 Looking at an example:
 
+```cpp
+// Property names are std::strings, copied every time a property is set or read.
+// Setting a molecule-level property:
+mol->setProp("molScore", 4.2f);
+float score = mol->getProp<float>("molScore");
+
+// Setting an atom property individually on each atom:
+for (Atom *atom : mol->atoms()) {
+  atom->setProp("partialCharge", partialCharges[atom->getIdx()]);
+}
+// Reading an atom property for one atom:
+float charge;
+if (atom->getPropIfPresent("partialCharge", charge)) {
+  ...
+}
+
+// Setting a property on a single bond:
+bond->setProp("customOrder", orderValue);
+float orderRead = bond->getProp<float>("customOrder");
 ```
 
+becomes
+
+```cpp
+// PropToken objects cache the string and its hash, so declare them once,
+// ideally as static variables or class members, and reuse them.
+static PropToken molScoreToken("molScore");
+static PropToken atomChargeToken("partialCharge");
+static PropToken bondOrderToken("customOrder");
+
+// Molecule-level property:
+rdmol.setMolProp(molScoreToken, 4.2f);
+float score;
+rdmol.getMolPropIfPresent(molScoreToken, score);
+
+// Setting a property on all atoms at once.
+// For scalar types, addAtomProp returns a pointer to the underlying array,
+// which can be filled directly — no per-atom overhead after the first atom.
+double *charges = rdmol.addAtomProp(atomChargeToken, 0.0);
+for (uint32_t atomIdx = 0, numAtoms = rdmol.getNumAtoms();
+    atomIdx < numAtoms; ++atomIdx) {
+  charges[atomIdx] = partialCharges[atomIdx];
+}
+
+// Reading all atom property values as a contiguous array
+// (only available for scalar types; returns nullptr otherwise):
+const double *readCharges =
+    rdmol.getAtomPropArrayIfPresent<double>(atomChargeToken);
+
+// Setting a property on only some atoms, one at a time:
+rdmol.setSingleAtomProp(atomChargeToken, atomIdx, chargeValue);
+// Reading a single atom's property value:
+double charge;
+if (rdmol.getAtomPropIfPresent(atomChargeToken, atomIdx, charge)) {
+  ...
+}
+
+// Bond property on a single bond:
+rdmol.setSingleBondProp(bondOrderToken, bondIdx, orderValue);
+float orderRead;
+rdmol.getBondPropIfPresent(bondOrderToken, bondIdx, orderRead);
 ```
 
 
