@@ -737,6 +737,8 @@ RDKIT_GRAPHMOL_EXPORT int setAromaticity(RWMol &mol, AromaticityModel model,
    \param mol    the molecule of interest
 
 */
+RDKIT_GRAPHMOL_EXPORT void cleanUp(RDMol &mol);
+//! \overload
 RDKIT_GRAPHMOL_EXPORT void cleanUp(RWMol &mol);
 
 //! Designed to be called by the sanitizer to handle special cases for

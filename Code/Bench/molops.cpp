@@ -243,3 +243,49 @@ TEST_CASE("MolOps::assignRadicals RDMol", "[molops][rdmol]") {
     });
   };
 }
+
+TEST_CASE("MolOps::cleanUp", "[molops]") {
+  auto samples = bench_common::load_samples();
+  BENCHMARK_ADVANCED("MolOps::cleanUp")(
+      Catch::Benchmark::Chronometer meter) {
+    std::vector<RWMol> work;
+    work.reserve(meter.runs() * samples.size());
+    for (int run = 0; run < meter.runs(); ++run) {
+      for (const auto &mol : samples) {
+        work.emplace_back(mol);
+      }
+    }
+    meter.measure([&](int i) {
+      uint64_t total = 0;
+      for (size_t s = 0; s < samples.size(); ++s) {
+        auto &mol = work[i * samples.size() + s];
+        MolOps::cleanUp(mol);
+        total += mol.getNumAtoms();
+      }
+      return total;
+    });
+  };
+}
+
+TEST_CASE("MolOps::cleanUp RDMol", "[molops][rdmol]") {
+  auto samples = bench_common::load_rdmol_samples();
+  BENCHMARK_ADVANCED("MolOps::cleanUp RDMol")(
+      Catch::Benchmark::Chronometer meter) {
+    std::vector<RDMol> work;
+    work.reserve(meter.runs() * samples.size());
+    for (int run = 0; run < meter.runs(); ++run) {
+      for (const auto &mol : samples) {
+        work.emplace_back(mol);
+      }
+    }
+    meter.measure([&](int i) {
+      uint64_t total = 0;
+      for (size_t s = 0; s < samples.size(); ++s) {
+        auto &mol = work[i * samples.size() + s];
+        MolOps::cleanUp(mol);
+        total += mol.getNumAtoms();
+      }
+      return total;
+    });
+  };
+}
