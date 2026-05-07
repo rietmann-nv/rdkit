@@ -94,6 +94,35 @@ cleanupChirality (commit pending)
   CHI_SQUAREPLANAR with degree 1 or 5+, etc. Often appears in MOL files
   with hand-set chirality that doesn't match the geometry.
 
+cleanUpOrganometallics + Canon::rankMolAtoms (deferred)
+  cleanUpOrganometallics is the SANITIZE_CLEANUP_ORGANOMETALLICS step.
+  Its body already opens with `auto &rdmol = mol.asRDMol();` so the
+  Phase 1 promotion looked trivial, but it tail-calls
+  `Canon::rankMolAtoms(mol, ranks)` (new_canon.cpp:781) on the RWMol.
+  Promoting cleanUpOrganometallics to RDMol& cleanly requires either:
+    (a) `Canon::rankMolAtoms(const RDMol&, ...)` overload; OR
+    (b) Calling rdmol.asROMol() inside the new RDMol& body, which
+        defeats the migration point.
+  Porting (a) requires porting the entire Canon:: ranking module:
+  initCanonAtoms, advancedInitCanonAtom, getBonds, makeBondHolder, the
+  Canon::canon_atom struct (currently holds Atom*), AtomCompareFunctor,
+  ChiralAtomCompareFunctor, SpecialChirality/SymmetryAtomCompareFunctor,
+  rankWithFunctor, etc. Multi-thousand LOC across new_canon.{h,cpp}.
+  This is its own large port and is out of scope for the sanitize+
+  removeHs migration.
+
+  Trigger for the inner branch: hypervalent non-metal atom (e.g. an
+  N+ with explicit valence > max allowed) bonded by a single bond to
+  a transition metal. None of our 12 bench samples contain metals, so
+  cleanUpOrganometallics does its outer iteration but never reaches
+  the rankMolAtoms call. The compat-shimmed RWMol-only path is
+  measurably slower than a native port would be -- but only on
+  organometallic inputs, which the canonical bench set has zero of.
+
+  Stress: any of the molStandardize organometallic test cases
+  (ferrocene, [Pd] complexes, EDTA chelates) reachable from
+  Code/GraphMol/MolStandardize/test_data/CPLX_*.mol.
+
 Future ports that will need stress entries
 ------------------------------------------
 
