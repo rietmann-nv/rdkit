@@ -108,32 +108,33 @@ void AssignHsResidueInfo(RWMol &mol) {
   }
 }
 
-std::map<unsigned int, std::vector<unsigned int>> getIsoMap(const ROMol &mol) {
+std::map<unsigned int, std::vector<unsigned int>> getIsoMap(RDMol &mol) {
   std::map<unsigned int, std::vector<unsigned int>> isoMap;
-  for (auto atom : mol.atoms()) {
-    if (atom->hasProp(common_properties::_isotopicHs)) {
-      atom->clearProp(common_properties::_isotopicHs);
-    }
-  }
-  for (auto bond : mol.bonds()) {
-    auto ba = bond->getBeginAtom();
-    auto ea = bond->getEndAtom();
+  // Wipe any existing _isotopicHs entries; they will be recomputed from
+  // the molecule's current isotope-bearing H neighbors below.
+  mol.clearAtomPropIfPresent(common_properties::_isotopicHsToken);
+  auto &bondVec = mol.getBondDataVector();
+  for (uint32_t bondIdx = 0, numBonds = uint32_t(bondVec.size());
+       bondIdx < numBonds; ++bondIdx) {
+    const BondData &bond = bondVec[bondIdx];
+    const atomindex_t baIdx = bond.getBeginAtomIdx();
+    const atomindex_t eaIdx = bond.getEndAtomIdx();
+    const AtomData &ba = mol.getAtom(baIdx);
+    const AtomData &ea = mol.getAtom(eaIdx);
     int ha = -1;
-    unsigned int iso;
-    if (ba->getAtomicNum() == 1 && ba->getIsotope() &&
-        ea->getAtomicNum() != 1) {
-      ha = ea->getIdx();
-      iso = ba->getIsotope();
-    } else if (ea->getAtomicNum() == 1 && ea->getIsotope() &&
-               ba->getAtomicNum() != 1) {
-      ha = ba->getIdx();
-      iso = ea->getIsotope();
+    unsigned int iso = 0;
+    if (ba.getAtomicNum() == 1 && ba.getIsotope() && ea.getAtomicNum() != 1) {
+      ha = eaIdx;
+      iso = ba.getIsotope();
+    } else if (ea.getAtomicNum() == 1 && ea.getIsotope() &&
+               ba.getAtomicNum() != 1) {
+      ha = baIdx;
+      iso = ea.getIsotope();
     }
     if (ha == -1) {
       continue;
     }
-    auto &v = isoMap[ha];
-    v.push_back(iso);
+    isoMap[ha].push_back(iso);
   }
   return isoMap;
 }
@@ -982,7 +983,7 @@ bool shouldRemoveH(const RWMol &mol, const Atom *atom,
 }
 
 // Do not remove H atoms that are part of SGroups that only contain H atoms.
-void filter_sgroup_emptying_hydrogens(const ROMol &mol,
+void filter_sgroup_emptying_hydrogens(const RDMol &mol,
                                       boost::dynamic_bitset<> &atomsToRemove) {
   for (const auto &sg : getSubstanceGroups(mol)) {
     const auto &atoms = sg.getAtoms();
@@ -1039,7 +1040,7 @@ void removeHs(RWMol &mol, const RemoveHsParameters &ps, bool sanitize) {
     atom->updatePropertyCache(false);
   }
   if (ps.removeAndTrackIsotopes) {
-    for (const auto &pair : getIsoMap(mol)) {
+    for (const auto &pair : getIsoMap(mol.asRDMol())) {
       mol.getAtomWithIdx(pair.first)
           ->setProp(common_properties::_isotopicHs, pair.second);
     }
@@ -1055,7 +1056,7 @@ void removeHs(RWMol &mol, const RemoveHsParameters &ps, bool sanitize) {
   // Once we know which H atoms would be removed, filter out those that
   // would cause any SGroups to become empty
   if (ps.removeInSGroups) {
-    filter_sgroup_emptying_hydrogens(mol, atomsToRemove);
+    filter_sgroup_emptying_hydrogens(mol.asRDMol(), atomsToRemove);
   }
 
   // now that we know which atoms need to be removed, go ahead and remove them

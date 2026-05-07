@@ -1135,6 +1135,7 @@ class Hybridizations {
   Hybridizations() {
     throw FileParseException("not to be called without a mol parameter");
   };
+  Hybridizations(const RDMol &mol);
   Hybridizations(const ROMol &mol);
   Hybridizations(const Hybridizations &) {
     throw FileParseException("not to be called without a mol parameter");
@@ -1166,10 +1167,15 @@ RDKIT_GRAPHMOL_EXPORT void cleanupChirality(RWMol &mol);
 
 //! removes bogus atropisomeric markers (e.g. those without sp2 begin and end
 //! atoms):
+RDKIT_GRAPHMOL_EXPORT void cleanupAtropisomers(RDMol &mol,
+                                               Hybridizations &hybridizations);
+//! \overload
 RDKIT_GRAPHMOL_EXPORT void cleanupAtropisomers(RWMol &mol,
                                                Hybridizations &hybridizations);
 //! \overload
-RDKIT_GRAPHMOL_EXPORT void cleanupAtropisomers(RWMol &);
+RDKIT_GRAPHMOL_EXPORT void cleanupAtropisomers(RDMol &mol);
+//! \overload
+RDKIT_GRAPHMOL_EXPORT void cleanupAtropisomers(RWMol &mol);
 
 //! \brief Uses a conformer to assign ChiralTypes to a molecule's atoms
 /*!

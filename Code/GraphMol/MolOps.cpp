@@ -521,70 +521,75 @@ void assignRadicals(RDMol &mol) {
 
 void assignRadicals(RWMol &mol) { assignRadicals(mol.asRDMol()); }
 
-MolOps::Hybridizations::Hybridizations(const ROMol &mol) {
+MolOps::Hybridizations::Hybridizations(const RDMol &mol) {
   d_hybridizations.clear();
-  // see if the mol already has computed hybridizations:
-
   if (mol.getNumAtoms() == 0) {
     return;
   }
 
-  if ((*mol.atoms().begin())->getHybridization() !=
-      Atom::HybridizationType::UNSPECIFIED) {
-    for (auto atom : mol.atoms()) {
-      d_hybridizations.push_back((int)atom->getHybridization());
+  // If the mol already has hybridizations computed, just snapshot them.
+  if (mol.getAtom(0).getHybridization() !=
+      AtomEnums::HybridizationType::UNSPECIFIED) {
+    const auto &atomVec = mol.getAtomDataVector();
+    d_hybridizations.reserve(atomVec.size());
+    for (const auto &atom : atomVec) {
+      d_hybridizations.push_back(static_cast<int>(atom.getHybridization()));
     }
     return;
   }
 
-  // compute them in a copy of the mol, so as not to change the mol passed in
-
-  RWMol molCopy(mol);
-  unsigned int operationThatFailed;
-  unsigned int santitizeOps =
-      MolOps::SANITIZE_SETCONJUGATION | MolOps::SANITIZE_SETHYBRIDIZATION;
-  MolOps::sanitizeMol(molCopy, operationThatFailed, santitizeOps);
-  for (auto atom : molCopy.atoms()) {
-    // determine hybridization and remove chiral atoms that are not sp3
-    d_hybridizations.push_back((int)atom->getHybridization());
+  // Otherwise compute them on a copy so the input isn't disturbed. The
+  // legacy code used MolOps::sanitizeMol with SANITIZE_SETCONJUGATION |
+  // SANITIZE_SETHYBRIDIZATION; we call the two steps directly to avoid the
+  // RWMol-only sanitizeMol wrapper while it's not yet ported.
+  RDMol molCopy(mol);
+  MolOps::setConjugation(molCopy);
+  MolOps::setHybridization(molCopy);
+  const auto &copyVec = molCopy.getAtomDataVector();
+  d_hybridizations.reserve(copyVec.size());
+  for (const auto &atom : copyVec) {
+    d_hybridizations.push_back(static_cast<int>(atom.getHybridization()));
   }
-  return;
 }
 
-void cleanupAtropisomers(RWMol &mol) {
-  auto hybs = MolOps::Hybridizations(mol);
+MolOps::Hybridizations::Hybridizations(const ROMol &mol)
+    : Hybridizations(mol.asRDMol()) {}
 
+void cleanupAtropisomers(RDMol &mol) {
+  auto hybs = MolOps::Hybridizations(mol);
   MolOps::cleanupAtropisomers(mol, hybs);
 }
 
+void cleanupAtropisomers(RWMol &mol) { cleanupAtropisomers(mol.asRDMol()); }
+
 namespace {
-bool checkBond(RWMol &mol, Bond *bond, MolOps::Hybridizations &hybs) {
-  if (!mol.getRingInfo()->isSssrOrBetter()) {
-    RDKit::MolOps::findSSSR(mol);
+bool checkBond(RDMol &mol, uint32_t bondIdx, MolOps::Hybridizations &hybs) {
+  if (!mol.getRingInfo().isSssrOrBetter()) {
+    RDKit::MolOps::findSSSR(mol, mol.getRingInfo());
   }
-  const RingInfo *ri = mol.getRingInfo();
-  if (hybs[bond->getBeginAtomIdx()] != Atom::SP2 ||
-      hybs[bond->getEndAtomIdx()] != Atom::SP2 ||
-      // do not clear bonds that part of a macrocycle
-      // because they can be linking actual atropisomeric portions
-      (ri->numBondRings(bond->getIdx()) > 0 &&
-       ri->minBondRingSize(bond->getIdx()) < 8)) {
-    bond->setStereo(Bond::BondStereo::STEREONONE);
+  const RingInfoCache &ri = mol.getRingInfo();
+  BondData &bond = mol.getBond(bondIdx);
+  if (hybs[bond.getBeginAtomIdx()] != AtomEnums::HybridizationType::SP2 ||
+      hybs[bond.getEndAtomIdx()] != AtomEnums::HybridizationType::SP2 ||
+      // do not clear bonds that are part of a macrocycle: those bonds may
+      // be linking actual atropisomeric portions of the molecule.
+      (ri.numBondRings(bondIdx) > 0 && ri.minBondRingSize(bondIdx) < 8)) {
+    bond.setStereo(BondEnums::BondStereo::STEREONONE);
     return true;
   }
   return false;
 }
 }  // namespace
 
-void cleanupAtropisomers(RWMol &mol, MolOps::Hybridizations &hybs) {
-  // make sure that ring info is available
-  // (defensive, current calls have it available)
+void cleanupAtropisomers(RDMol &mol, MolOps::Hybridizations &hybs) {
   bool needCleanupAtropisomerStereoGroups = false;
-  for (auto bond : mol.bonds()) {
-    switch (bond->getStereo()) {
-      case Bond::BondStereo::STEREOATROPCW:
-      case Bond::BondStereo::STEREOATROPCCW:
-        if (checkBond(mol, bond, hybs)) {
+  auto &bondVec = mol.getBondDataVector();
+  for (uint32_t bondIdx = 0, numBonds = uint32_t(bondVec.size());
+       bondIdx < numBonds; ++bondIdx) {
+    switch (bondVec[bondIdx].getStereo()) {
+      case BondEnums::BondStereo::STEREOATROPCW:
+      case BondEnums::BondStereo::STEREOATROPCCW:
+        if (checkBond(mol, bondIdx, hybs)) {
           needCleanupAtropisomerStereoGroups = true;
         }
         break;
@@ -592,10 +597,13 @@ void cleanupAtropisomers(RWMol &mol, MolOps::Hybridizations &hybs) {
         break;
     }
   }
-
   if (needCleanupAtropisomerStereoGroups) {
     Atropisomers::cleanupAtropisomerStereoGroups(mol);
   }
+}
+
+void cleanupAtropisomers(RWMol &mol, MolOps::Hybridizations &hybs) {
+  cleanupAtropisomers(mol.asRDMol(), hybs);
 }
 void sanitizeMol(RWMol &mol) {
   unsigned int failedOp = 0;
