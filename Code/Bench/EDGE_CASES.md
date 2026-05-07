@@ -65,13 +65,26 @@ clearSingleBondDirFlags (commit 7a86e1eeb)
 setConjugation, setHybridization, adjustHs (commit c3cdb3146)
   These run on every atom/bond on every sample. Measurements representative.
 
+cleanupChirality (commit pending)
+  Trigger: atoms with a chiral tag where the chirality is structurally
+  invalid -- specifically, sp/sp2 hybridized atoms with CHI_TETRAHEDRAL[_CW/CCW]
+  tags (these get cleared and trigger Chirality::cleanupStereoGroups), or
+  non-tetrahedral chirality (CHI_SQUAREPLANAR, CHI_TRIGONALBIPYRAMIDAL,
+  CHI_OCTAHEDRAL) with bad degree, or with permutation values exceeding
+  the per-shape maximum (2/3/20/30). Canonical SMILES does not produce
+  these.
+
+  Bench observation: the canonical samples DO have chiral atoms (every
+  [C@H], [C@@H]) so the outer atom loop and switch hit, the body never
+  takes the cleanup branch. Measured 10.5% RDMol/ROMol gap is the
+  outer-loop-only cost.
+
+  Stress: atoms with manually-applied chirality on non-sp3 centers, or
+  CHI_SQUAREPLANAR with degree 1 or 5+, etc. Often appears in MOL files
+  with hand-set chirality that doesn't match the geometry.
+
 Future ports that will need stress entries
 ------------------------------------------
-
-cleanupChirality
-  Branches only fire on atoms with chirality tags that have become invalid
-  (e.g., wrong neighbor count after sanitize). Canonical SMILES does not
-  produce these.
 
 cleanupAtropisomers
   Branches only fire on bonds carrying atropisomer markers without sp2

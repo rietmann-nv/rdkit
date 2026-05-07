@@ -3064,74 +3064,76 @@ void findPotentialStereoBonds(ROMol &mol, bool cleanIt) {
 }
 
 // removes chirality markers from sp and sp2 hybridized centers:
-void cleanupChirality(RWMol &mol) {
-  unsigned int degree, perm;
+void cleanupChirality(RDMol &mol) {
   bool needCleanupStereoGroups = false;
-  for (auto atom : mol.atoms()) {
-    switch (atom->getChiralTag()) {
-      case Atom::CHI_TETRAHEDRAL_CW:
-      case Atom::CHI_TETRAHEDRAL_CCW:
-        if (atom->getHybridization() != Atom::SP3) {
-          atom->setChiralTag(Atom::CHI_UNSPECIFIED);
+  auto &atomVec = mol.getAtomDataVector();
+  const auto &permToken = common_properties::_chiralPermutationToken;
+  for (uint32_t aid = 0, numAtoms = uint32_t(atomVec.size()); aid < numAtoms;
+       ++aid) {
+    AtomData &atom = atomVec[aid];
+    switch (atom.getChiralTag()) {
+      case AtomEnums::ChiralType::CHI_TETRAHEDRAL_CW:
+      case AtomEnums::ChiralType::CHI_TETRAHEDRAL_CCW:
+        if (atom.getHybridization() != AtomEnums::HybridizationType::SP3) {
+          atom.setChiralTag(AtomEnums::ChiralType::CHI_UNSPECIFIED);
           needCleanupStereoGroups = true;
         }
         break;
 
-      case Atom::CHI_TETRAHEDRAL:
-        if (atom->getHybridization() != Atom::SP3) {
-          atom->setChiralTag(Atom::CHI_UNSPECIFIED);
+      case AtomEnums::ChiralType::CHI_TETRAHEDRAL:
+        if (atom.getHybridization() != AtomEnums::HybridizationType::SP3) {
+          atom.setChiralTag(AtomEnums::ChiralType::CHI_UNSPECIFIED);
           needCleanupStereoGroups = true;
         } else {
-          perm = 0;
-          atom->getPropIfPresent(common_properties::_chiralPermutation, perm);
+          unsigned int perm = 0;
+          mol.getAtomPropIfPresent(permToken, aid, perm);
           if (perm > 2) {
-            perm = 0;
-            atom->setProp(common_properties::_chiralPermutation, perm);
+            mol.setSingleAtomProp(permToken, aid, 0u);
           }
         }
         break;
 
-      case Atom::CHI_SQUAREPLANAR:
-        degree = atom->getTotalDegree();
+      case AtomEnums::ChiralType::CHI_SQUAREPLANAR: {
+        unsigned int degree = mol.getAtomTotalDegree(aid);
         if (degree < 2 || degree > 4) {
-          atom->setChiralTag(Atom::CHI_UNSPECIFIED);
+          atom.setChiralTag(AtomEnums::ChiralType::CHI_UNSPECIFIED);
         } else {
-          perm = 0;
-          atom->getPropIfPresent(common_properties::_chiralPermutation, perm);
+          unsigned int perm = 0;
+          mol.getAtomPropIfPresent(permToken, aid, perm);
           if (perm > 3) {
-            perm = 0;
-            atom->setProp(common_properties::_chiralPermutation, perm);
+            mol.setSingleAtomProp(permToken, aid, 0u);
           }
         }
         break;
+      }
 
-      case Atom::CHI_TRIGONALBIPYRAMIDAL:
-        degree = atom->getTotalDegree();
+      case AtomEnums::ChiralType::CHI_TRIGONALBIPYRAMIDAL: {
+        unsigned int degree = mol.getAtomTotalDegree(aid);
         if (degree < 2 || degree > 5) {
-          atom->setChiralTag(Atom::CHI_UNSPECIFIED);
+          atom.setChiralTag(AtomEnums::ChiralType::CHI_UNSPECIFIED);
         } else {
-          perm = 0;
-          atom->getPropIfPresent(common_properties::_chiralPermutation, perm);
+          unsigned int perm = 0;
+          mol.getAtomPropIfPresent(permToken, aid, perm);
           if (perm > 20) {
-            perm = 0;
-            atom->setProp(common_properties::_chiralPermutation, perm);
+            mol.setSingleAtomProp(permToken, aid, 0u);
           }
         }
         break;
+      }
 
-      case Atom::CHI_OCTAHEDRAL:
-        degree = atom->getTotalDegree();
+      case AtomEnums::ChiralType::CHI_OCTAHEDRAL: {
+        unsigned int degree = mol.getAtomTotalDegree(aid);
         if (degree < 2 || degree > 6) {
-          atom->setChiralTag(Atom::CHI_UNSPECIFIED);
+          atom.setChiralTag(AtomEnums::ChiralType::CHI_UNSPECIFIED);
         } else {
-          perm = 0;
-          atom->getPropIfPresent(common_properties::_chiralPermutation, perm);
+          unsigned int perm = 0;
+          mol.getAtomPropIfPresent(permToken, aid, perm);
           if (perm > 30) {
-            perm = 0;
-            atom->setProp(common_properties::_chiralPermutation, perm);
+            mol.setSingleAtomProp(permToken, aid, 0u);
           }
         }
         break;
+      }
 
       default:
         /* ??? Handle other types in future.  */
@@ -3142,6 +3144,8 @@ void cleanupChirality(RWMol &mol) {
     Chirality::cleanupStereoGroups(mol);
   }
 }
+
+void cleanupChirality(RWMol &mol) { cleanupChirality(mol.asRDMol()); }
 
 #define VOLTEST(X, Y, Z) (v[X].dotProduct(v[Y].crossProduct(v[Z])) >= 0.0)
 

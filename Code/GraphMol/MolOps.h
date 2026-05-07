@@ -1160,6 +1160,8 @@ class Hybridizations {
 
 //! removes bogus chirality markers (e.g. tetrahedral flags on non-sp3
 //! centers):
+RDKIT_GRAPHMOL_EXPORT void cleanupChirality(RDMol &mol);
+//! \overload
 RDKIT_GRAPHMOL_EXPORT void cleanupChirality(RWMol &mol);
 
 //! removes bogus atropisomeric markers (e.g. those without sp2 begin and end
