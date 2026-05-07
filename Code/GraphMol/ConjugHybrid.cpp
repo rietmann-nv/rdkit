@@ -144,37 +144,33 @@ bool atomHasConjugatedBond(const RDMol &mol, std::uint32_t atomIdx) {
   return false;
 }
 
-void setConjugation(ROMol &mol) {
+void setConjugation(RDMol &mol) {
   // start with all bonds being marked unconjugated
   // except for aromatic bonds
-  auto &rdmol = mol.asRDMol();
-
-  for (uint32_t bondIdx = 0, numBonds = rdmol.getNumBonds(); bondIdx < numBonds;
-       ++bondIdx) {
-    BondData &bond = rdmol.getBond(bondIdx);
+  for (BondData &bond : mol.getBondDataVector()) {
     bond.setIsConjugated(bond.getIsAromatic());
   }
 
   // loop over each atom and check if the bonds connecting to it can
-  // be conjugated
-
-  for (uint32_t atomIdx = 0, numAtoms = rdmol.getNumAtoms(); atomIdx < numAtoms;
+  // be conjugated. markConjAtomBonds needs the atom index, so iterate
+  // by index here.
+  for (uint32_t atomIdx = 0, numAtoms = mol.getNumAtoms(); atomIdx < numAtoms;
        ++atomIdx) {
-    markConjAtomBonds(rdmol, atomIdx);
+    markConjAtomBonds(mol, atomIdx);
   }
 }
 
-void setHybridization(ROMol &mol) {
-  auto &rdmol = mol.asRDMol();
+void setConjugation(ROMol &mol) { setConjugation(mol.asRDMol()); }
 
-  for (uint32_t atomIdx = 0, numAtoms = rdmol.getNumAtoms(); atomIdx < numAtoms;
+void setHybridization(RDMol &mol) {
+  for (uint32_t atomIdx = 0, numAtoms = mol.getNumAtoms(); atomIdx < numAtoms;
        ++atomIdx) {
-    auto &atom = rdmol.getAtom(atomIdx);
+    auto &atom = mol.getAtom(atomIdx);
     if (atom.getAtomicNum() == 0) {
       atom.setHybridization(AtomEnums::HybridizationType::UNSPECIFIED);
     } else {
       // if the stereo spec matches the coordination number, this is easy
-      const auto totalDegree = rdmol.getAtomTotalDegree(atomIdx);
+      const auto totalDegree = mol.getAtomTotalDegree(atomIdx);
       switch (atom.getChiralTag()) {
         case Atom::ChiralType::CHI_TETRAHEDRAL:
         case Atom::ChiralType::CHI_TETRAHEDRAL_CW:
@@ -211,7 +207,7 @@ void setHybridization(ROMol &mol) {
       // ones just use the degree
       // FIX: we should probably also be using the degree for metals
       if (atom.getAtomicNum() < 89) {
-        norbs = numBondsPlusLonePairs(rdmol, atomIdx, atom);
+        norbs = numBondsPlusLonePairs(mol, atomIdx, atom);
       } else {
         norbs = totalDegree;
       }
@@ -240,7 +236,7 @@ void setHybridization(ROMol &mol) {
           //   not be SP2)
           // This is Issue276
           if (totalDegree > 3 ||
-              !MolOps::atomHasConjugatedBond(rdmol, atomIdx)) {
+              !MolOps::atomHasConjugatedBond(mol, atomIdx)) {
             atom.setHybridization(AtomEnums::HybridizationType::SP3);
           } else {
             atom.setHybridization(AtomEnums::HybridizationType::SP2);
@@ -258,5 +254,8 @@ void setHybridization(ROMol &mol) {
     }
   }
 }
+
+void setHybridization(ROMol &mol) { setHybridization(mol.asRDMol()); }
+
 }  // end of namespace MolOps
 }  // end of namespace RDKit

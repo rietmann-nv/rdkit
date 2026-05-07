@@ -59,3 +59,141 @@ TEST_CASE("MolOps::getMolFrags", "[molops]") {
     return total;
   };
 }
+
+TEST_CASE("MolOps::setConjugation", "[molops]") {
+  auto samples = bench_common::load_samples();
+  BENCHMARK_ADVANCED("MolOps::setConjugation")(
+      Catch::Benchmark::Chronometer meter) {
+    std::vector<ROMol> work;
+    work.reserve(meter.runs() * samples.size());
+    for (int run = 0; run < meter.runs(); ++run) {
+      for (const auto &mol : samples) {
+        work.emplace_back(mol);
+      }
+    }
+    meter.measure([&](int i) {
+      uint64_t total = 0;
+      for (size_t s = 0; s < samples.size(); ++s) {
+        auto &mol = work[i * samples.size() + s];
+        MolOps::setConjugation(mol);
+        total += mol.getNumBonds();
+      }
+      return total;
+    });
+  };
+}
+
+TEST_CASE("MolOps::setConjugation RDMol", "[molops][rdmol]") {
+  auto samples = bench_common::load_rdmol_samples();
+  BENCHMARK_ADVANCED("MolOps::setConjugation RDMol")(
+      Catch::Benchmark::Chronometer meter) {
+    std::vector<RDMol> work;
+    work.reserve(meter.runs() * samples.size());
+    for (int run = 0; run < meter.runs(); ++run) {
+      for (const auto &mol : samples) {
+        work.emplace_back(mol);
+      }
+    }
+    meter.measure([&](int i) {
+      uint64_t total = 0;
+      for (size_t s = 0; s < samples.size(); ++s) {
+        auto &mol = work[i * samples.size() + s];
+        MolOps::setConjugation(mol);
+        total += mol.getNumBonds();
+      }
+      return total;
+    });
+  };
+}
+
+TEST_CASE("MolOps::setHybridization", "[molops]") {
+  auto samples = bench_common::load_samples();
+  BENCHMARK_ADVANCED("MolOps::setHybridization")(
+      Catch::Benchmark::Chronometer meter) {
+    std::vector<ROMol> work;
+    work.reserve(meter.runs() * samples.size());
+    for (int run = 0; run < meter.runs(); ++run) {
+      for (const auto &mol : samples) {
+        work.emplace_back(mol);
+      }
+    }
+    meter.measure([&](int i) {
+      uint64_t total = 0;
+      for (size_t s = 0; s < samples.size(); ++s) {
+        auto &mol = work[i * samples.size() + s];
+        MolOps::setHybridization(mol);
+        total += mol.getNumAtoms();
+      }
+      return total;
+    });
+  };
+}
+
+TEST_CASE("MolOps::setHybridization RDMol", "[molops][rdmol]") {
+  auto samples = bench_common::load_rdmol_samples();
+  BENCHMARK_ADVANCED("MolOps::setHybridization RDMol")(
+      Catch::Benchmark::Chronometer meter) {
+    std::vector<RDMol> work;
+    work.reserve(meter.runs() * samples.size());
+    for (int run = 0; run < meter.runs(); ++run) {
+      for (const auto &mol : samples) {
+        work.emplace_back(mol);
+      }
+    }
+    meter.measure([&](int i) {
+      uint64_t total = 0;
+      for (size_t s = 0; s < samples.size(); ++s) {
+        auto &mol = work[i * samples.size() + s];
+        MolOps::setHybridization(mol);
+        total += mol.getNumAtoms();
+      }
+      return total;
+    });
+  };
+}
+
+TEST_CASE("MolOps::adjustHs", "[molops]") {
+  auto samples = bench_common::load_samples();
+  BENCHMARK_ADVANCED("MolOps::adjustHs")(
+      Catch::Benchmark::Chronometer meter) {
+    std::vector<RWMol> work;
+    work.reserve(meter.runs() * samples.size());
+    for (int run = 0; run < meter.runs(); ++run) {
+      for (const auto &mol : samples) {
+        work.emplace_back(mol);
+      }
+    }
+    meter.measure([&](int i) {
+      uint64_t total = 0;
+      for (size_t s = 0; s < samples.size(); ++s) {
+        auto &mol = work[i * samples.size() + s];
+        MolOps::adjustHs(mol);
+        total += mol.getNumAtoms();
+      }
+      return total;
+    });
+  };
+}
+
+TEST_CASE("MolOps::adjustHs RDMol", "[molops][rdmol]") {
+  auto samples = bench_common::load_rdmol_samples();
+  BENCHMARK_ADVANCED("MolOps::adjustHs RDMol")(
+      Catch::Benchmark::Chronometer meter) {
+    std::vector<RDMol> work;
+    work.reserve(meter.runs() * samples.size());
+    for (int run = 0; run < meter.runs(); ++run) {
+      for (const auto &mol : samples) {
+        work.emplace_back(mol);
+      }
+    }
+    meter.measure([&](int i) {
+      uint64_t total = 0;
+      for (size_t s = 0; s < samples.size(); ++s) {
+        auto &mol = work[i * samples.size() + s];
+        MolOps::adjustHs(mol);
+        total += mol.getNumAtoms();
+      }
+      return total;
+    });
+  };
+}

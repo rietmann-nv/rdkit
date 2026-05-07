@@ -1310,16 +1310,27 @@ class RDKIT_GRAPHMOL_EXPORT RDMol {
 
   // For RDKit use only
   std::vector<AtomData> &getAtomDataVector() { return atomData; }
+  const std::vector<AtomData> &getAtomDataVector() const { return atomData; }
   // For RDKit use only
   std::vector<BondData> &getBondDataVector() { return bondData; }
+  const std::vector<BondData> &getBondDataVector() const { return bondData; }
   // For RDKit use only
   std::vector<uint32_t> &getAtomBondStartsVector() { return atomBondStarts; }
+  const std::vector<uint32_t> &getAtomBondStartsVector() const {
+    return atomBondStarts;
+  }
   // For RDKit use only
   std::vector<uint32_t> &getOtherAtomIndicesVector() {
     return otherAtomIndices;
   }
+  const std::vector<uint32_t> &getOtherAtomIndicesVector() const {
+    return otherAtomIndices;
+  }
   // For RDKit use only
   std::vector<uint32_t> &getBondDataIndicesVector() { return bondDataIndices; }
+  const std::vector<uint32_t> &getBondDataIndicesVector() const {
+    return bondDataIndices;
+  }
 
   bool hasProp(const PropToken &name) const;
   bool hasAtomProp(const PropToken &name, uint32_t index) const;

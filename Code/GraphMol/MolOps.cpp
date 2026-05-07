@@ -381,7 +381,7 @@ void cleanUpOrganometallics(RWMol &mol) {
   }
 }
 
-void adjustHs(RWMol &mol) {
+void adjustHs(RDMol &mol) {
   //
   //  Go through and adjust the number of implicit and explicit Hs
   //  on each atom in the molecule.
@@ -392,15 +392,14 @@ void adjustHs(RWMol &mol) {
   //  sanitized, aromaticity has been perceived, and the implicit
   //  valence of everything has been calculated.
   //
-  auto &rdmol = mol.asRDMol();
-  for (uint32_t atomIdx = 0, numAtoms = rdmol.getNumAtoms(); atomIdx < numAtoms;
+  for (uint32_t atomIdx = 0, numAtoms = mol.getNumAtoms(); atomIdx < numAtoms;
        ++atomIdx) {
-    AtomData &atom = rdmol.getAtom(atomIdx);
+    AtomData &atom = mol.getAtom(atomIdx);
     int origImplicitV = atom.getValence(AtomData::ValenceType::IMPLICIT);
-    rdmol.calcAtomExplicitValence(atomIdx, false);
+    mol.calcAtomExplicitValence(atomIdx, false);
     int origExplicitV = atom.getNumExplicitHs();
 
-    int newImplicitV = rdmol.calcAtomImplicitValence(atomIdx, false);
+    int newImplicitV = mol.calcAtomImplicitValence(atomIdx, false);
     //
     //  Case 1: The disappearing Hydrogen
     //    Smiles:  O=C1NC=CC2=C1C=CC=C2
@@ -419,10 +418,12 @@ void adjustHs(RWMol &mol) {
     //    write:
     if (newImplicitV < origImplicitV) {
       atom.setNumExplicitHs(origExplicitV + (origImplicitV - newImplicitV));
-      rdmol.calcAtomExplicitValence(atomIdx, false);
+      mol.calcAtomExplicitValence(atomIdx, false);
     }
   }
 }
+
+void adjustHs(RWMol &mol) { adjustHs(mol.asRDMol()); }
 
 void assignRadicals(RWMol &mol) {
   for (auto atom : mol.atoms()) {

@@ -774,6 +774,8 @@ RDKIT_GRAPHMOL_EXPORT void assignRadicals(RWMol &mol);
          everything has been calculated.
 
 */
+RDKIT_GRAPHMOL_EXPORT void adjustHs(RDMol &mol);
+//! \overload
 RDKIT_GRAPHMOL_EXPORT void adjustHs(RWMol &mol);
 
 //! Kekulizes the molecule
@@ -857,9 +859,13 @@ RDKIT_GRAPHMOL_EXPORT bool KekulizeIfPossible(RWMol &mol,
                                               unsigned int maxBackTracks = 100);
 
 //! flags the molecule's conjugated bonds
+RDKIT_GRAPHMOL_EXPORT void setConjugation(RDMol &mol);
+//! \overload
 RDKIT_GRAPHMOL_EXPORT void setConjugation(ROMol &mol);
 
 //! calculates and sets the hybridization of all a molecule's Stoms
+RDKIT_GRAPHMOL_EXPORT void setHybridization(RDMol &mol);
+//! \overload
 RDKIT_GRAPHMOL_EXPORT void setHybridization(ROMol &mol);
 
 //!  @}
