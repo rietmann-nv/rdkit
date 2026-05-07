@@ -139,20 +139,59 @@ std::map<unsigned int, std::vector<unsigned int>> getIsoMap(RDMol &mol) {
   return isoMap;
 }
 
-bool may_need_extra_H(const ROMol &mol, const Atom *atom) {
+int atomPerturbationOrder(const RDMol &mol, atomindex_t atomIdx,
+                          const INT_LIST &probe) {
+  // Replicates Atom::getPerturbationOrder against the flat adjacency.
+  const size_t numBonds = mol.getAtomDegree(atomIdx);
+  PRECONDITION(numBonds == probe.size(), "size mismatch");
+  auto [beginBonds, endBonds] = mol.getAtomBonds(atomIdx);
+  std::vector<int> copy(probe.begin(), probe.end());
+
+  // The native bond list is sorted by construction; leave the safety check
+  // in place to match the legacy fallback.
+  bool isSorted = true;
+  for (size_t i = 0; numBonds > 0 && i < numBonds - 1; ++i) {
+    isSorted = isSorted && (beginBonds[i] < beginBonds[i + 1]);
+  }
+  if (isSorted) {
+    int nSwaps = 0;
+    for (size_t desti = 0, n = copy.size(); desti < n; ++desti) {
+      size_t besti = desti;
+      for (size_t srci = desti + 1; srci < n; ++srci) {
+        if (copy[srci] < copy[besti]) {
+          besti = srci;
+        }
+      }
+      if (besti != desti) {
+        ++nSwaps;
+        std::swap(copy[besti], copy[desti]);
+      }
+    }
+    return nSwaps;
+  }
+  std::vector<int> bondsCopy(beginBonds, endBonds);
+  return static_cast<int>(countSwapsToInterconvert(bondsCopy, copy));
+}
+
+bool may_need_extra_H(const RDMol &mol, atomindex_t atomIdx) {
   unsigned single_bonds = 0;
   unsigned aromatic_bonds = 0;
-  for (auto bond : mol.atomBonds(atom)) {
-    if (bond->getBondType() == Bond::SINGLE) {
+  auto [bondBegin, bondEnd] = mol.getAtomBonds(atomIdx);
+  for (auto it = bondBegin; it != bondEnd; ++it) {
+    const BondData &bond = mol.getBond(*it);
+    if (bond.getBondType() == BondEnums::BondType::SINGLE) {
       ++single_bonds;
-    } else if (bond->getBondType() == Bond::AROMATIC) {
+    } else if (bond.getBondType() == BondEnums::BondType::AROMATIC) {
       ++aromatic_bonds;
     } else {
       return false;
     }
   }
-  return single_bonds == 1 && aromatic_bonds == 2 &&
-         atom->getTotalValence() == 3;
+  const AtomData &atom = mol.getAtom(atomIdx);
+  const unsigned int totalValence =
+      atom.getValence(AtomData::ValenceType::EXPLICIT) +
+      atom.getValence(AtomData::ValenceType::IMPLICIT);
+  return single_bonds == 1 && aromatic_bonds == 2 && totalValence == 3;
 }
 
 }  // end of unnamed namespace
@@ -655,74 +694,94 @@ void addHs(RWMol &mol, const AddHsParameters &params,
 
 namespace {
 // returns whether or not an adjustment was made, in case we want that info
-bool adjustStereoAtomsIfRequired(RWMol &mol, const Atom *atom,
-                                 const Atom *heavyAtom) {
-  PRECONDITION(atom != nullptr, "bad atom");
-  PRECONDITION(heavyAtom != nullptr, "bad heavy atom");
+bool adjustStereoAtomsIfRequired(RDMol &mol, atomindex_t atomIdx,
+                                 atomindex_t heavyAtomIdx) {
   // nothing we can do if the degree is only 2 (and we should have covered
   // that earlier anyway)
-  if (heavyAtom->getDegree() == 2) {
+  if (mol.getAtomDegree(heavyAtomIdx) == 2) {
     return false;
   }
-  const auto &cbnd =
-      mol.getBondBetweenAtoms(atom->getIdx(), heavyAtom->getIdx());
-  if (!cbnd) {
+  if (mol.getBondIndexBetweenAtoms(atomIdx, heavyAtomIdx) ==
+      std::numeric_limits<uint32_t>::max()) {
     return false;
   }
-  for (const auto &nbri :
-       boost::make_iterator_range(mol.getAtomBonds(heavyAtom))) {
-    Bond *bnd = mol[nbri];
-    if (bnd->getBondType() == Bond::DOUBLE &&
-        bnd->getStereo() > Bond::STEREOANY) {
-      auto sAtomIt = std::find(bnd->getStereoAtoms().begin(),
-                               bnd->getStereoAtoms().end(), atom->getIdx());
-      if (sAtomIt != bnd->getStereoAtoms().end()) {
-        // sAtomIt points to the position of this atom's index in the list.
-        // find the index of another atom attached to the heavy atom and
-        // use it to update sAtomIt
-        unsigned int dblNbrIdx = bnd->getOtherAtomIdx(heavyAtom->getIdx());
-        for (const auto &nbri :
-             boost::make_iterator_range(mol.getAtomNeighbors(heavyAtom))) {
-          const auto &nbr = mol[nbri];
-          if (nbr->getIdx() == dblNbrIdx || nbr->getIdx() == atom->getIdx()) {
-            continue;
-          }
-          *sAtomIt = nbr->getIdx();
-          bool madeAdjustment = true;
-          switch (bnd->getStereo()) {
-            case Bond::STEREOCIS:
-              bnd->setStereo(Bond::STEREOTRANS);
-              break;
-            case Bond::STEREOTRANS:
-              bnd->setStereo(Bond::STEREOCIS);
-              break;
-            default:
-              // I think we shouldn't need to do anything with E and Z...
-              madeAdjustment = false;
-              break;
-          }
-          return madeAdjustment;
-        }
+  auto [hbBegin, hbEnd] = mol.getAtomBonds(heavyAtomIdx);
+  for (auto bIt = hbBegin; bIt != hbEnd; ++bIt) {
+    BondData &bnd = mol.getBond(*bIt);
+    if (bnd.getBondType() != BondEnums::BondType::DOUBLE ||
+        bnd.getStereo() <= BondEnums::BondStereo::STEREOANY) {
+      continue;
+    }
+    if (!mol.hasBondStereoAtoms(*bIt)) {
+      continue;
+    }
+    const atomindex_t *stereoAtoms = mol.getBondStereoAtoms(*bIt);
+    const atomindex_t storedA = stereoAtoms[0];
+    const atomindex_t storedB = stereoAtoms[1];
+    int slot = -1;
+    if (storedA == atomIdx) {
+      slot = 0;
+    } else if (storedB == atomIdx) {
+      slot = 1;
+    } else {
+      continue;
+    }
+    // find another neighbor of the heavy atom (not the double-bond partner,
+    // not the H being removed) and substitute it into the stereo-atom slot.
+    const atomindex_t dblNbrIdx = bnd.getOtherAtomIdx(heavyAtomIdx);
+    auto [nbrBegin, nbrEnd] = mol.getAtomNeighbors(heavyAtomIdx);
+    for (auto nIt = nbrBegin; nIt != nbrEnd; ++nIt) {
+      const uint32_t nbrIdx = *nIt;
+      if (nbrIdx == dblNbrIdx || nbrIdx == atomIdx) {
+        continue;
       }
+      const atomindex_t newA =
+          (slot == 0) ? atomindex_t(nbrIdx) : storedA;
+      const atomindex_t newB =
+          (slot == 1) ? atomindex_t(nbrIdx) : storedB;
+      mol.setBondStereoAtoms(*bIt, newA, newB);
+      bool madeAdjustment = true;
+      switch (bnd.getStereo()) {
+        case BondEnums::BondStereo::STEREOCIS:
+          bnd.setStereo(BondEnums::BondStereo::STEREOTRANS);
+          break;
+        case BondEnums::BondStereo::STEREOTRANS:
+          bnd.setStereo(BondEnums::BondStereo::STEREOCIS);
+          break;
+        default:
+          // I think we shouldn't need to do anything with E and Z...
+          madeAdjustment = false;
+          break;
+      }
+      return madeAdjustment;
     }
   }
   return false;
 }
 
-void molRemoveH(RWMol &mol, unsigned int idx, bool updateExplicitCount) {
-  auto atom = mol.getAtomWithIdx(idx);
-  PRECONDITION(atom->getAtomicNum() == 1, "idx corresponds to a non-Hydrogen");
-  for (const auto bond : mol.atomBonds(atom)) {
-    Atom *heavyAtom = bond->getOtherAtom(atom);
-    int heavyAtomNum = heavyAtom->getAtomicNum();
+void molRemoveH(RDMol &mol, atomindex_t idx, bool updateExplicitCount) {
+  AtomData &atom = mol.getAtom(idx);
+  PRECONDITION(atom.getAtomicNum() == 1, "idx corresponds to a non-Hydrogen");
+
+  // Snapshot the bond indices for this H atom; we'll iterate over them
+  // while mutating bond / atom state but the adjacency itself isn't
+  // changing until removeAtom at the end.
+  auto [hBondBegin, hBondEnd] = mol.getAtomBonds(idx);
+  std::vector<uint32_t> hBondIndices(hBondBegin, hBondEnd);
+
+  for (const uint32_t bondIdx : hBondIndices) {
+    BondData &bond = mol.getBond(bondIdx);
+    const atomindex_t heavyAtomIdx = bond.getOtherAtomIdx(idx);
+    AtomData &heavyAtom = mol.getAtom(heavyAtomIdx);
+    const int heavyAtomNum = heavyAtom.getAtomicNum();
 
     // we'll update the neighbor's explicit H count if we were told to
     // *or* if the neighbor is chiral, in which case the H is needed
     // in order to complete the coordination
     // *or* if the neighbor has the noImplicit flag set:
-    if (updateExplicitCount || heavyAtom->getNoImplicit() ||
-        heavyAtom->getChiralTag() != Atom::CHI_UNSPECIFIED) {
-      heavyAtom->setNumExplicitHs(heavyAtom->getNumExplicitHs() + 1);
+    if (updateExplicitCount || heavyAtom.getNoImplicit() ||
+        heavyAtom.getChiralTag() != AtomEnums::ChiralType::CHI_UNSPECIFIED) {
+      heavyAtom.setNumExplicitHs(heavyAtom.getNumExplicitHs() + 1);
     } else {
       // this is a special case related to Issue 228 and the
       // "disappearing Hydrogen" problem discussed in MolOps::adjustHs
@@ -733,112 +792,123 @@ void molRemoveH(RWMol &mol, unsigned int idx, bool updateExplicitCount) {
       // explicit count, even if the H itself isn't marked as explicit
       const INT_VECT &defaultVs =
           PeriodicTable::getTable()->getValenceList(heavyAtomNum);
+      const bool aromatic = mol.isAromaticAtom(heavyAtomIdx);
+      const unsigned int heavyTotalValence =
+          heavyAtom.getValence(AtomData::ValenceType::EXPLICIT) +
+          heavyAtom.getValence(AtomData::ValenceType::IMPLICIT);
       if (((heavyAtomNum == 7 || heavyAtomNum == 15 ||
-            may_need_extra_H(mol, heavyAtom)) &&
-           isAromaticAtom(*heavyAtom)) ||
+            may_need_extra_H(mol, heavyAtomIdx)) &&
+           aromatic) ||
           (std::find(defaultVs.begin() + 1, defaultVs.end(),
-                     heavyAtom->getTotalValence()) != defaultVs.end())) {
-        heavyAtom->setNumExplicitHs(heavyAtom->getNumExplicitHs() + 1);
+                     int(heavyTotalValence)) != defaultVs.end())) {
+        heavyAtom.setNumExplicitHs(heavyAtom.getNumExplicitHs() + 1);
       }
     }
 
-    // One other consequence of removing the H from the graph is
-    // that we may change the ordering of the bonds about a
-    // chiral center.  This may change the chiral label at that
-    // atom.  We deal with that by explicitly checking here:
-    if (heavyAtom->getChiralTag() != Atom::CHI_UNSPECIFIED) {
-      INT_LIST neighborIndices;
-      for (const auto &nbnd : mol.atomBonds(heavyAtom)) {
-        if (nbnd->getIdx() != bond->getIdx()) {
-          neighborIndices.push_back(nbnd->getIdx());
+    // One other consequence of removing the H from the graph is that we
+    // may change the ordering of the bonds about a chiral center, which
+    // may change the chiral label at that atom. Handle it explicitly.
+    if (heavyAtom.getChiralTag() != AtomEnums::ChiralType::CHI_UNSPECIFIED) {
+      INT_LIST neighborBondIndices;
+      auto [habBegin, habEnd] = mol.getAtomBonds(heavyAtomIdx);
+      for (auto it = habBegin; it != habEnd; ++it) {
+        if (*it != bondIdx) {
+          neighborBondIndices.push_back(int(*it));
         }
       }
-      neighborIndices.push_back(bond->getIdx());
-
-      int nSwaps = heavyAtom->getPerturbationOrder(neighborIndices);
-      // std::cerr << "H: "<<atom->getIdx()<<" hvy:
-      // "<<heavyAtom->getIdx()<<" swaps: " << nSwaps<<std::endl;
+      neighborBondIndices.push_back(int(bondIdx));
+      const int nSwaps =
+          atomPerturbationOrder(mol, heavyAtomIdx, neighborBondIndices);
       if (nSwaps % 2) {
-        heavyAtom->invertChirality();
+        // invert chirality
+        switch (heavyAtom.getChiralTag()) {
+          case AtomEnums::ChiralType::CHI_TETRAHEDRAL_CW:
+            heavyAtom.setChiralTag(
+                AtomEnums::ChiralType::CHI_TETRAHEDRAL_CCW);
+            break;
+          case AtomEnums::ChiralType::CHI_TETRAHEDRAL_CCW:
+            heavyAtom.setChiralTag(
+                AtomEnums::ChiralType::CHI_TETRAHEDRAL_CW);
+            break;
+          default:
+            break;
+        }
       }
     }
 
     // If we are removing a H atom that defines bond stereo (e.g. imines),
-    // Then also remove the bond stereo information, as it is no longer valid.
-    if (heavyAtom->getDegree() == 2) {
-      for (auto nbnd : mol.atomBonds(heavyAtom)) {
-        if (nbnd != bond) {
-          if (nbnd->getStereo() > Bond::STEREOANY) {
-            nbnd->setStereo(Bond::STEREONONE);
-            nbnd->getStereoAtoms().clear();
+    // also remove the bond stereo information, as it is no longer valid.
+    if (mol.getAtomDegree(heavyAtomIdx) == 2) {
+      auto [habBegin, habEnd] = mol.getAtomBonds(heavyAtomIdx);
+      for (auto it = habBegin; it != habEnd; ++it) {
+        if (*it != bondIdx) {
+          BondData &nbnd = mol.getBond(*it);
+          if (nbnd.getStereo() > BondEnums::BondStereo::STEREOANY) {
+            nbnd.setStereo(BondEnums::BondStereo::STEREONONE);
+            mol.clearBondStereoAtoms(*it);
           }
           break;
         }
       }
     }
 
-    // if it's a wavy bond, then we need to
-    // mark the beginning atom with the _UnknownStereo tag.
-    // so that we know later that something was affecting its
-    // stereochem
-    if (bond->getBondDir() == Bond::UNKNOWN &&
-        bond->getBeginAtomIdx() == heavyAtom->getIdx()) {
-      heavyAtom->setProp(common_properties::_UnknownStereo, 1);
-    } else if (bond->getBondDir() == Bond::ENDDOWNRIGHT ||
-               bond->getBondDir() == Bond::ENDUPRIGHT) {
+    // wavy bond → mark the beginning atom with _UnknownStereo
+    if (bond.getBondDir() == BondEnums::BondDir::UNKNOWN &&
+        bond.getBeginAtomIdx() == heavyAtomIdx) {
+      mol.setSingleAtomProp(common_properties::_UnknownStereoToken,
+                            heavyAtomIdx, 1);
+    } else if (bond.getBondDir() == BondEnums::BondDir::ENDDOWNRIGHT ||
+               bond.getBondDir() == BondEnums::BondDir::ENDUPRIGHT) {
       // if the direction is set on this bond and the atom it's connected to
       // has no other single bonds with directions set, then we need to set
       // direction on one of the other neighbors in order to avoid double
       // bond stereochemistry possibly being lost. This was github #754
       bool foundADir = false;
-      Bond *oBond = nullptr;
-      for (const auto &nbri :
-           boost::make_iterator_range(mol.getAtomBonds(heavyAtom))) {
-        Bond *nbnd = mol[nbri];
-        if (nbnd->getIdx() != bond->getIdx() &&
-            nbnd->getBondType() == Bond::SINGLE) {
-          if (nbnd->getBondDir() == Bond::NONE) {
-            oBond = nbnd;
+      uint32_t oBondIdx = std::numeric_limits<uint32_t>::max();
+      auto [habBegin, habEnd] = mol.getAtomBonds(heavyAtomIdx);
+      for (auto it = habBegin; it != habEnd; ++it) {
+        if (*it == bondIdx) {
+          continue;
+        }
+        BondData &nbnd = mol.getBond(*it);
+        if (nbnd.getBondType() == BondEnums::BondType::SINGLE) {
+          if (nbnd.getBondDir() == BondEnums::BondDir::NONE) {
+            oBondIdx = *it;
           } else {
             foundADir = true;
           }
         }
       }
-      if (!foundADir && oBond != nullptr) {
-        bool flipIt = (oBond->getBeginAtom() == heavyAtom) &&
-                      (bond->getBeginAtom() == heavyAtom);
+      if (!foundADir && oBondIdx != std::numeric_limits<uint32_t>::max()) {
+        BondData &oBond = mol.getBond(oBondIdx);
+        const bool flipIt = (oBond.getBeginAtomIdx() == heavyAtomIdx) &&
+                            (bond.getBeginAtomIdx() == heavyAtomIdx);
         if (flipIt) {
-          oBond->setBondDir(bond->getBondDir() == Bond::ENDDOWNRIGHT
-                                ? Bond::ENDUPRIGHT
-                                : Bond::ENDDOWNRIGHT);
+          oBond.setBondDir(
+              bond.getBondDir() == BondEnums::BondDir::ENDDOWNRIGHT
+                  ? BondEnums::BondDir::ENDUPRIGHT
+                  : BondEnums::BondDir::ENDDOWNRIGHT);
         } else {
-          oBond->setBondDir(bond->getBondDir());
+          oBond.setBondDir(bond.getBondDir());
         }
       }
-      // if this atom is one of the stereoatoms for a double bond we need
-      // to switch the stereo atom on this end to be the other neighbor
-      // This was part of github #1810
-      adjustStereoAtomsIfRequired(mol, atom, heavyAtom);
+      adjustStereoAtomsIfRequired(mol, idx, heavyAtomIdx);
     } else {
-      // if this atom is one of the stereoatoms for a double bond we need
-      // to switch the stereo atom on this end to be the other neighbor
-      // This was part of github #1810
-      adjustStereoAtomsIfRequired(mol, atom, heavyAtom);
+      adjustStereoAtomsIfRequired(mol, idx, heavyAtomIdx);
     }
 
     // remove the bond from any SGroups that might include it.
     for (auto &sg : getSubstanceGroups(mol)) {
-      sg.removeBondWithIdx(bond->getIdx());
+      sg.removeBondWithIdx(bondIdx);
     }
   }
 
-  // Finally, remove the atom from any SGroups that might include it, so that
-  // the SGroups don't get removed in removeAtom(). Since we allow removing
-  // SGroup SAP lvidx H atoms, we need to check for those and update them.
+  // Finally, remove the atom from any SGroups that might include it, so the
+  // SGroups don't get removed in removeAtom(). Since we allow removing
+  // SGroup SAP lvidx H atoms, check for those and update them.
   for (auto &sg : getSubstanceGroups(mol)) {
     sg.removeAtomWithIdx(idx);
     sg.removeParentAtomWithIdx(idx);
-
     for (auto &sap : sg.getAttachPoints()) {
       if (sap.lvIdx == static_cast<int>(idx)) {
         sap.lvIdx = -1;
@@ -846,19 +916,21 @@ void molRemoveH(RWMol &mol, unsigned int idx, bool updateExplicitCount) {
     }
   }
   // computed properties will be cleared after all hydrogens are removed
-  bool clearProps = false;
-  mol.removeAtom(atom, clearProps);
+  const bool clearProps = false;
+  mol.removeAtom(idx, clearProps);
 }
 
-bool shouldRemoveH(const RWMol &mol, const Atom *atom,
+bool shouldRemoveH(const RDMol &mol, atomindex_t atomIdx,
                    const RemoveHsParameters &ps) {
-  if (atom->getAtomicNum() != 1) {
+  const AtomData &atom = mol.getAtom(atomIdx);
+  if (atom.getAtomicNum() != 1) {
     return false;
   }
-  if (!ps.removeWithQuery && atom->hasQuery()) {
+  if (!ps.removeWithQuery && mol.getAtomQuery(atomIdx) != nullptr) {
     return false;
   }
-  if (!ps.removeDegreeZero && !atom->getDegree()) {
+  const uint32_t degree = mol.getAtomDegree(atomIdx);
+  if (!ps.removeDegreeZero && degree == 0) {
     if (ps.showWarnings) {
       BOOST_LOG(rdWarningLog)
           << "WARNING: not removing hydrogen atom without neighbors"
@@ -866,16 +938,17 @@ bool shouldRemoveH(const RWMol &mol, const Atom *atom,
     }
     return false;
   }
-  if (!ps.removeHigherDegrees && atom->getDegree() > 1) {
+  if (!ps.removeHigherDegrees && degree > 1) {
     return false;
   }
-  if (!ps.removeIsotopes && !ps.removeAndTrackIsotopes && atom->getIsotope()) {
+  if (!ps.removeIsotopes && !ps.removeAndTrackIsotopes && atom.getIsotope()) {
     return false;
   }
-  if (!ps.removeNonimplicit && !atom->hasProp(common_properties::isImplicit)) {
+  if (!ps.removeNonimplicit &&
+      !mol.hasAtomProp(common_properties::isImplicitToken, atomIdx)) {
     return false;
   }
-  if (!ps.removeMapped && atom->getAtomMapNum()) {
+  if (!ps.removeMapped && mol.getAtomMapNum(atomIdx)) {
     return false;
   }
 
@@ -887,48 +960,53 @@ bool shouldRemoveH(const RWMol &mol, const Atom *atom,
       // it's not part of the group, but it defines its boundaries.
       for (const auto &bond_idx : sg.getBonds()) {
         if (sg.getBondType(bond_idx) == SubstanceGroup::BondType::XBOND) {
-          auto bond = mol.getBondWithIdx(bond_idx);
-          if (bond->getBeginAtom() == atom || bond->getEndAtom() == atom) {
+          const BondData &bond = mol.getBond(bond_idx);
+          if (bond.getBeginAtomIdx() == atomIdx ||
+              bond.getEndAtomIdx() == atomIdx) {
             return false;
           }
         }
       }
 
       for (const auto &sap : sg.getAttachPoints()) {
-        // The H atoms is an attach point. This would be weird, but is possible.
+        // The H atom is an attach point. This would be weird, but is possible.
         // (if it is a 'leaving atom' we don't care, though)
-        if (sap.aIdx == atom->getIdx()) {
+        if (sap.aIdx == atomIdx) {
           return false;
         }
       }
 
       for (const auto &cs : sg.getCStates()) {
         // The bond to the H atom defines a CState
-        auto bond = mol.getBondWithIdx(cs.bondIdx);
-        if (bond->getBeginAtom() == atom || bond->getEndAtom() == atom) {
+        const BondData &bond = mol.getBond(cs.bondIdx);
+        if (bond.getBeginAtomIdx() == atomIdx ||
+            bond.getEndAtomIdx() == atomIdx) {
           return false;
         }
       }
     }
   } else {
     for (const auto &sg : getSubstanceGroups(mol)) {
-      if (sg.includesAtom(atom->getIdx())) {
+      if (sg.includesAtom(atomIdx)) {
         return false;
       }
     }
   }
-  if (!ps.removeHydrides && atom->getFormalCharge() == -1) {
+  if (!ps.removeHydrides && atom.getFormalCharge() == -1) {
     return false;
   }
   bool removeIt = true;
-  if (atom->getDegree() &&
+  if (degree &&
       (!ps.removeDummyNeighbors || !ps.removeDefiningBondStereo ||
        !ps.removeOnlyHNeighbors || !ps.removeNontetrahedralNeighbors ||
        !ps.removeWithWedgedBond)) {
     bool onlyHNeighbors = true;
-    for (const auto nbr : mol.atomNeighbors(atom)) {
+    auto [nbrBegin, nbrEnd] = mol.getAtomNeighbors(atomIdx);
+    for (auto it = nbrBegin; it != nbrEnd; ++it) {
+      const uint32_t nbrIdx = *it;
+      const AtomData &nbr = mol.getAtom(nbrIdx);
       // is it a dummy?
-      if (!ps.removeDummyNeighbors && nbr->getAtomicNum() < 1) {
+      if (!ps.removeDummyNeighbors && nbr.getAtomicNum() < 1) {
         if (ps.showWarnings) {
           BOOST_LOG(rdWarningLog) << "WARNING: not removing hydrogen atom "
                                      "with dummy atom neighbors"
@@ -947,13 +1025,15 @@ bool shouldRemoveH(const RWMol &mol, const Atom *atom,
         }
         return false;
       }
-      if (!ps.removeOnlyHNeighbors && nbr->getAtomicNum() != 1) {
+      if (!ps.removeOnlyHNeighbors && nbr.getAtomicNum() != 1) {
         onlyHNeighbors = false;
       }
+      const uint32_t bondToNbrIdx =
+          mol.getBondIndexBetweenAtoms(atomIdx, nbrIdx);
+      const BondData &bondToNbr = mol.getBond(bondToNbrIdx);
       if (!ps.removeWithWedgedBond) {
-        const auto bnd = mol.getBondBetweenAtoms(atom->getIdx(), nbr->getIdx());
-        if (bnd->getBondDir() == Bond::BEGINDASH ||
-            bnd->getBondDir() == Bond::BEGINWEDGE) {
+        if (bondToNbr.getBondDir() == BondEnums::BondDir::BEGINDASH ||
+            bondToNbr.getBondDir() == BondEnums::BondDir::BEGINWEDGE) {
           if (ps.showWarnings) {
             BOOST_LOG(rdWarningLog) << "WARNING: not removing hydrogen atom "
                                        "with wedged bond"
@@ -964,12 +1044,13 @@ bool shouldRemoveH(const RWMol &mol, const Atom *atom,
       }
       // Check to see if the neighbor has a double bond and we're the only
       // neighbor at this end.  This was part of github #1810
-      if (!ps.removeDefiningBondStereo && nbr->getDegree() == 2) {
-        for (const auto bnd : mol.atomBonds(nbr)) {
-          if (bnd->getBondType() == Bond::DOUBLE &&
-              (bnd->getStereo() > Bond::STEREOANY ||
-               mol.getBondBetweenAtoms(atom->getIdx(), nbr->getIdx())
-                       ->getBondDir() > Bond::NONE)) {
+      if (!ps.removeDefiningBondStereo && mol.getAtomDegree(nbrIdx) == 2) {
+        auto [nbrBondBegin, nbrBondEnd] = mol.getAtomBonds(nbrIdx);
+        for (auto bIt = nbrBondBegin; bIt != nbrBondEnd; ++bIt) {
+          const BondData &nbrBnd = mol.getBond(*bIt);
+          if (nbrBnd.getBondType() == BondEnums::BondType::DOUBLE &&
+              (nbrBnd.getStereo() > BondEnums::BondStereo::STEREOANY ||
+               bondToNbr.getBondDir() > BondEnums::BondDir::NONE)) {
             return false;
           }
         }
@@ -1047,16 +1128,18 @@ void removeHs(RWMol &mol, const RemoveHsParameters &ps, bool sanitize) {
   }
   boost::dynamic_bitset<> atomsToRemove{mol.getNumAtoms(), 0};
 
-  for (auto atom : mol.atoms()) {
-    if (shouldRemoveH(mol, atom, ps)) {
-      atomsToRemove.set(atom->getIdx());
+  RDMol &rdmol = mol.asRDMol();
+  for (uint32_t atomIdx = 0, numAtoms = mol.getNumAtoms(); atomIdx < numAtoms;
+       ++atomIdx) {
+    if (shouldRemoveH(rdmol, atomIdx, ps)) {
+      atomsToRemove.set(atomIdx);
     }
   }  // end of the loop over atoms
 
   // Once we know which H atoms would be removed, filter out those that
   // would cause any SGroups to become empty
   if (ps.removeInSGroups) {
-    filter_sgroup_emptying_hydrogens(mol.asRDMol(), atomsToRemove);
+    filter_sgroup_emptying_hydrogens(rdmol, atomsToRemove);
   }
 
   // now that we know which atoms need to be removed, go ahead and remove them
@@ -1064,7 +1147,7 @@ void removeHs(RWMol &mol, const RemoveHsParameters &ps, bool sanitize) {
   // to be able to safely use batch editing.
   for (int idx = mol.getNumAtoms() - 1; idx >= 0; --idx) {
     if (atomsToRemove[idx]) {
-      molRemoveH(mol, idx, ps.updateExplicitCount);
+      molRemoveH(rdmol, atomindex_t(idx), ps.updateExplicitCount);
     }
   }
   mol.clearComputedProps(true);
