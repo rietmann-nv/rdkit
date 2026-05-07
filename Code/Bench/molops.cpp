@@ -313,6 +313,76 @@ TEST_CASE("MolOps::cleanupChirality", "[molops]") {
   };
 }
 
+TEST_CASE("MolOps::removeHs", "[molops]") {
+  // The default-parsed samples have explicit Hs removed already; build a
+  // pool that contains explicit Hs to exercise the function.
+  auto baseSamples = bench_common::load_samples();
+  std::vector<RWMol> samplesWithHs;
+  samplesWithHs.reserve(baseSamples.size());
+  for (auto &mol : baseSamples) {
+    RWMol withHs(mol);
+    MolOps::addHs(withHs);
+    samplesWithHs.push_back(std::move(withHs));
+  }
+
+  BENCHMARK_ADVANCED("MolOps::removeHs")(
+      Catch::Benchmark::Chronometer meter) {
+    std::vector<RWMol> work;
+    work.reserve(meter.runs() * samplesWithHs.size());
+    for (int run = 0; run < meter.runs(); ++run) {
+      for (const auto &mol : samplesWithHs) {
+        work.emplace_back(mol);
+      }
+    }
+    meter.measure([&](int i) {
+      uint64_t total = 0;
+      for (size_t s = 0; s < samplesWithHs.size(); ++s) {
+        auto &mol = work[i * samplesWithHs.size() + s];
+        MolOps::removeHs(mol);
+        total += mol.getNumAtoms();
+      }
+      return total;
+    });
+  };
+}
+
+TEST_CASE("MolOps::removeHs RDMol", "[molops][rdmol]") {
+  auto baseSamples = bench_common::load_rdmol_samples();
+  // To exercise removeHs, the input molecules need explicit Hs. We add
+  // them here via the (still RWMol-only) MolOps::addHs and then snapshot
+  // back into RDMol. Once addHs is ported, this can drop the bridge.
+  std::vector<RDMol> samplesWithHs;
+  samplesWithHs.reserve(baseSamples.size());
+  for (auto &mol : baseSamples) {
+    RWMol withHs(mol.asROMol());
+    MolOps::addHs(withHs);
+    samplesWithHs.emplace_back(withHs.asRDMol());
+    samplesWithHs.back().clearCompatibilityData();
+  }
+
+  BENCHMARK_ADVANCED("MolOps::removeHs RDMol")(
+      Catch::Benchmark::Chronometer meter) {
+    std::vector<RDMol> work;
+    work.reserve(meter.runs() * samplesWithHs.size());
+    for (int run = 0; run < meter.runs(); ++run) {
+      for (const auto &mol : samplesWithHs) {
+        work.emplace_back(mol);
+      }
+    }
+    MolOps::SanitizeTemp temp;
+    MolOps::RemoveHsParameters ps;
+    meter.measure([&](int i) {
+      uint64_t total = 0;
+      for (size_t s = 0; s < samplesWithHs.size(); ++s) {
+        auto &mol = work[i * samplesWithHs.size() + s];
+        MolOps::removeHs(mol, ps, temp, /*sanitize=*/false);
+        total += mol.getNumAtoms();
+      }
+      return total;
+    });
+  };
+}
+
 TEST_CASE("MolOps::cleanupChirality RDMol", "[molops][rdmol]") {
   auto samples = bench_common::load_rdmol_samples();
   BENCHMARK_ADVANCED("MolOps::cleanupChirality RDMol")(

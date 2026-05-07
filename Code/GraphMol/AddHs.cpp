@@ -1099,13 +1099,20 @@ void filter_sgroup_emptying_hydrogens(const RDMol &mol,
 
 }  // end of anonymous namespace
 
-void removeHs(RWMol &mol, const RemoveHsParameters &ps, bool sanitize) {
+void removeHs(RDMol &mol, const RemoveHsParameters &ps,
+              MolOps::SanitizeTemp &temp, bool sanitize) {
+  // The SanitizeTemp workspace is currently unused by the body itself; it's
+  // threaded through the API so that an eventual sanitizeMol(RDMol&,
+  // SanitizeTemp&) port can reuse the buffers without changing this
+  // function's signature.
+  (void)temp;
+
   if (ps.removeAndTrackIsotopes) {
-    // if there are any non-isotopic Hs remove them first
-    // to make sure chirality is preserved
+    // if there are any non-isotopic Hs remove them first to make sure
+    // chirality is preserved.
     bool needRemoveHs = false;
-    for (auto atom : mol.atoms()) {
-      if (atom->getAtomicNum() == 1 && atom->getIsotope() == 0) {
+    for (const auto &atom : mol.getAtomDataVector()) {
+      if (atom.getAtomicNum() == 1 && atom.getIsotope() == 0) {
         needRemoveHs = true;
         break;
       }
@@ -1114,67 +1121,73 @@ void removeHs(RWMol &mol, const RemoveHsParameters &ps, bool sanitize) {
       RemoveHsParameters psCopy(ps);
       psCopy.removeAndTrackIsotopes = false;
       psCopy.removeIsotopes = false;
-      removeHs(mol, psCopy, false);
+      removeHs(mol, psCopy, temp, false);
     }
   }
-  for (auto atom : mol.atoms()) {
-    atom->updatePropertyCache(false);
+  for (uint32_t atomIdx = 0, numAtoms = mol.getNumAtoms(); atomIdx < numAtoms;
+       ++atomIdx) {
+    mol.updateAtomPropertyCache(atomIdx, false);
   }
   if (ps.removeAndTrackIsotopes) {
-    for (const auto &pair : getIsoMap(mol.asRDMol())) {
-      mol.getAtomWithIdx(pair.first)
-          ->setProp(common_properties::_isotopicHs, pair.second);
+    for (const auto &pair : getIsoMap(mol)) {
+      mol.setSingleAtomProp(common_properties::_isotopicHsToken,
+                            atomindex_t(pair.first), pair.second);
     }
   }
   boost::dynamic_bitset<> atomsToRemove{mol.getNumAtoms(), 0};
 
-  RDMol &rdmol = mol.asRDMol();
   for (uint32_t atomIdx = 0, numAtoms = mol.getNumAtoms(); atomIdx < numAtoms;
        ++atomIdx) {
-    if (shouldRemoveH(rdmol, atomIdx, ps)) {
+    if (shouldRemoveH(mol, atomIdx, ps)) {
       atomsToRemove.set(atomIdx);
     }
-  }  // end of the loop over atoms
-
-  // Once we know which H atoms would be removed, filter out those that
-  // would cause any SGroups to become empty
-  if (ps.removeInSGroups) {
-    filter_sgroup_emptying_hydrogens(rdmol, atomsToRemove);
   }
 
-  // now that we know which atoms need to be removed, go ahead and remove them
-  // NOTE: there's too much complexity around stereochemistry here
-  // to be able to safely use batch editing.
-  for (int idx = mol.getNumAtoms() - 1; idx >= 0; --idx) {
+  // Once we know which H atoms would be removed, filter out those that
+  // would cause any SGroups to become empty.
+  if (ps.removeInSGroups) {
+    filter_sgroup_emptying_hydrogens(mol, atomsToRemove);
+  }
+
+  // Remove the marked atoms one at a time. NOTE: stereochemistry handling
+  // makes batch editing unsafe here.
+  for (int idx = int(mol.getNumAtoms()) - 1; idx >= 0; --idx) {
     if (atomsToRemove[idx]) {
-      molRemoveH(rdmol, atomindex_t(idx), ps.updateExplicitCount);
+      molRemoveH(mol, atomindex_t(idx), ps.updateExplicitCount);
     }
   }
   mol.clearComputedProps(true);
-  //
-  //  If we didn't only remove implicit Hs, which are guaranteed to
-  //  be the highest numbered atoms, we may have altered atom indices.
-  //  This can screw up derived properties (such as ring members), so
-  //  do some checks:
-  //
+
+  // If we removed non-implicit Hs, atom indices may have shifted in ways
+  // that invalidate derived properties (ring membership, etc); re-sanitize.
   if (!atomsToRemove.empty() && ps.removeNonimplicit && sanitize) {
-    sanitizeMol(mol);
+    // sanitizeMol(RDMol&) is not yet ported; bridge through the compat
+    // shell. This is the last asRWMol() in removeHs and disappears when
+    // sanitizeMol lands.
+    sanitizeMol(mol.asRWMol());
   }
 
-  // if we removed Hs and any chiral atoms now have more than 1 explict H,
-  // remove those
+  // If we removed Hs and any chiral atom ended up with more than one
+  // explicit H, drop those redundant counts.
   if (!atomsToRemove.empty()) {
-    for (auto atom : mol.atoms()) {
-      if (!atom->getNoImplicit() &&
-          atom->getChiralTag() != Atom::CHI_UNSPECIFIED) {
-        unsigned int numExplicitHs = atom->getNumExplicitHs();
-        if (numExplicitHs > 1) {
-          atom->setNumExplicitHs(0);
-          atom->updatePropertyCache(false);
+    auto &atomVec = mol.getAtomDataVector();
+    for (uint32_t atomIdx = 0, numAtoms = uint32_t(atomVec.size());
+         atomIdx < numAtoms; ++atomIdx) {
+      AtomData &atom = atomVec[atomIdx];
+      if (!atom.getNoImplicit() &&
+          atom.getChiralTag() != AtomEnums::ChiralType::CHI_UNSPECIFIED) {
+        if (atom.getNumExplicitHs() > 1) {
+          atom.setNumExplicitHs(0);
+          mol.updateAtomPropertyCache(atomIdx, false);
         }
       }
     }
   }
+}
+
+void removeHs(RWMol &mol, const RemoveHsParameters &ps, bool sanitize) {
+  MolOps::SanitizeTemp temp;
+  removeHs(mol.asRDMol(), ps, temp, sanitize);
 }
 ROMol *removeHs(const ROMol &mol, const RemoveHsParameters &ps, bool sanitize) {
   auto *res = new RWMol(mol);
@@ -1185,6 +1198,13 @@ ROMol *removeHs(const ROMol &mol, const RemoveHsParameters &ps, bool sanitize) {
     throw;
   }
   return static_cast<ROMol *>(res);
+}
+void removeHs(RDMol &mol, MolOps::SanitizeTemp &temp, bool implicitOnly,
+              bool updateExplicitCount, bool sanitize) {
+  RemoveHsParameters ps;
+  ps.removeNonimplicit = !implicitOnly;
+  ps.updateExplicitCount = updateExplicitCount;
+  removeHs(mol, ps, temp, sanitize);
 }
 void removeHs(RWMol &mol, bool implicitOnly, bool updateExplicitCount,
               bool sanitize) {
