@@ -150,23 +150,33 @@ void convertToBonds(const std::vector<uint32_t> &begins,
 }
 
 void convertToBonds(const INT_VECT &ring, INT_VECT &bondRing,
-                    const ROMol &mol) {
+                    const RDMol &mol) {
   bondRing.resize(ring.size());
   static_assert(sizeof(ring[0]) == sizeof(uint32_t) &&
                 sizeof(bondRing[0]) == sizeof(uint32_t));
   RingUtils::convertToBonds(
       reinterpret_cast<const uint32_t *>(ring.data()), ring.size(),
-      reinterpret_cast<uint32_t *>(bondRing.data()), mol.asRDMol());
+      reinterpret_cast<uint32_t *>(bondRing.data()), mol);
+}
+
+void convertToBonds(const INT_VECT &ring, INT_VECT &bondRing,
+                    const ROMol &mol) {
+  convertToBonds(ring, bondRing, mol.asRDMol());
 }
 
 void convertToBonds(const VECT_INT_VECT &res, VECT_INT_VECT &brings,
-                    const ROMol &mol) {
+                    const RDMol &mol) {
   brings.reserve(res.size());
   for (const auto &ring : res) {
     INT_VECT bring;
     convertToBonds(ring, bring, mol);
     brings.push_back(bring);
   }
+}
+
+void convertToBonds(const VECT_INT_VECT &res, VECT_INT_VECT &brings,
+                    const ROMol &mol) {
+  convertToBonds(res, brings, mol.asRDMol());
 }
 
 }  // end of namespace RingUtils

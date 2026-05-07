@@ -827,6 +827,10 @@ RDKIT_GRAPHMOL_EXPORT void adjustHs(RWMol &mol);
        RDKit::Bond::SINGLE or RDKit::Bond::DOUBLE during Kekulization.
 
 */
+RDKIT_GRAPHMOL_EXPORT void Kekulize(RDMol &mol, bool markAtomsBonds = true,
+                                    bool canonical = true,
+                                    unsigned int maxBackTracks = 100);
+//! \overload
 RDKIT_GRAPHMOL_EXPORT void Kekulize(RWMol &mol, bool markAtomsBonds = true,
                                     bool canonical = true,
                                     unsigned int maxBackTracks = 100);
@@ -857,6 +861,11 @@ RDKIT_GRAPHMOL_EXPORT void Kekulize(RWMol &mol, bool markAtomsBonds = true,
        RDKit::Bond::SINGLE or RDKit::Bond::DOUBLE during Kekulization.
 
 */
+RDKIT_GRAPHMOL_EXPORT bool KekulizeIfPossible(RDMol &mol,
+                                              bool markAtomsBonds = true,
+                                              bool canonical = true,
+                                              unsigned int maxBackTracks = 100);
+//! \overload
 RDKIT_GRAPHMOL_EXPORT bool KekulizeIfPossible(RWMol &mol,
                                               bool markAtomsBonds = true,
                                               bool canonical = true,
@@ -1409,6 +1418,11 @@ RDKIT_GRAPHMOL_EXPORT std::string getMolFormula(
 
 namespace details {
 //! not recommended for use in other code
+RDKIT_GRAPHMOL_EXPORT void KekulizeFragment(
+    RDMol &mol, const boost::dynamic_bitset<> &atomsToUse,
+    boost::dynamic_bitset<> bondsToUse, bool markAtomsBonds = true,
+    bool canonical = true, unsigned int maxBackTracks = 100);
+//! \overload
 RDKIT_GRAPHMOL_EXPORT void KekulizeFragment(
     RWMol &mol, const boost::dynamic_bitset<> &atomsToUse,
     boost::dynamic_bitset<> bondsToUse, bool markAtomsBonds = true,

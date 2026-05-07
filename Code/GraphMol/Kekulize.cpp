@@ -579,7 +579,7 @@ void kekulizeFused(RDMol &mol, const VECT_INT_VECT &arings,
 
 namespace MolOps {
 namespace details {
-void KekulizeFragment(RWMol &mol, const boost::dynamic_bitset<> &atomsToUse,
+void KekulizeFragment(RDMol &mol, const boost::dynamic_bitset<> &atomsToUse,
                       boost::dynamic_bitset<> bondsToUse, bool markAtomsBonds,
                       bool canonical, unsigned int maxBackTracks) {
   PRECONDITION(atomsToUse.size() == mol.getNumAtoms(),
@@ -594,12 +594,14 @@ void KekulizeFragment(RWMol &mol, const boost::dynamic_bitset<> &atomsToUse,
   // there's no point doing kekulization if there are no aromatic bonds
   // without queries:
   bool foundAromatic = false;
-  for (const auto bond : mol.bonds()) {
-    if (bondsToUse[bond->getIdx()]) {
-      if (QueryOps::hasBondTypeQuery(*bond)) {
+  auto &bondVec = mol.getBondDataVector();
+  for (uint32_t bondIdx = 0, nbnds = uint32_t(bondVec.size()); bondIdx < nbnds;
+       ++bondIdx) {
+    if (bondsToUse[bondIdx]) {
+      if (QueryOps::hasBondTypeQuery(ConstRDMolBond(&mol, bondIdx))) {
         // we don't kekulize bonds with bond type queries
-        bondsToUse[bond->getIdx()] = 0;
-      } else if (bond->getIsAromatic()) {
+        bondsToUse[bondIdx] = 0;
+      } else if (bondVec[bondIdx].getIsAromatic()) {
         foundAromatic = true;
       }
     }
@@ -608,29 +610,37 @@ void KekulizeFragment(RWMol &mol, const boost::dynamic_bitset<> &atomsToUse,
   // before everything do implicit valence calculation and store them
   // we will repeat after kekulization and compare for the sake of error
   // checking
-  auto numAtoms = mol.getNumAtoms();
+  const uint32_t numAtoms = mol.getNumAtoms();
   INT_VECT valences(numAtoms);
   boost::dynamic_bitset<> dummyAts(numAtoms);
 
-  for (auto atom : mol.atoms()) {
-    if (!atomsToUse[atom->getIdx()]) {
+  for (uint32_t atomIdx = 0; atomIdx < numAtoms; ++atomIdx) {
+    if (!atomsToUse[atomIdx]) {
       continue;
     }
-    atom->calcImplicitValence(false);
-    valences[atom->getIdx()] = atom->getTotalValence();
-    if (isAromaticAtom(*atom)) {
+    mol.calcAtomImplicitValence(atomIdx, false);
+    const AtomData &atom = mol.getAtom(atomIdx);
+    valences[atomIdx] =
+        int(atom.getValence(AtomData::ValenceType::EXPLICIT) +
+            atom.getValence(AtomData::ValenceType::IMPLICIT));
+    if (mol.isAromaticAtom(atomIdx)) {
       foundAromatic = true;
     }
-    if (!atom->getAtomicNum()) {
-      dummyAts[atom->getIdx()] = 1;
+    if (!atom.getAtomicNum()) {
+      dummyAts[atomIdx] = 1;
     }
   }
   if (!foundAromatic) {
     return;
   }
-  UINT_VECT atomRanks(mol.getNumAtoms());
+  UINT_VECT atomRanks(numAtoms);
   if (canonical) {
-    Canon::rankFragmentAtoms(mol, atomRanks, atomsToUse, bondsToUse);
+    // Canon::rankFragmentAtoms is part of the canonical ranking module
+    // (new_canon.h) which is still ROMol-shaped. Bridge through asROMol()
+    // for this single call. Documented as the deferred Canon module port
+    // in EDGE_CASES.md; the canonical=true path is not exercised by the
+    // sanitize hot path (sanitize calls Kekulize(mol, true, false)).
+    Canon::rankFragmentAtoms(mol.asROMol(), atomRanks, atomsToUse, bondsToUse);
   } else {
     // When canonical=false (e.g. during sanitization), we skip the
     // expensive ranking step and use atom indices directly.  This is
@@ -645,11 +655,13 @@ void KekulizeFragment(RWMol &mol, const boost::dynamic_bitset<> &atomsToUse,
   if (bondsToUse.any()) {
     // mark atoms at the beginning of wedged bonds
     boost::dynamic_bitset<> wedgedAtoms(numAtoms);
-    for (const auto bond : mol.bonds()) {
-      if (bondsToUse[bond->getIdx()] &&
-          (bond->getBondDir() == Bond::BEGINWEDGE ||
-           bond->getBondDir() == Bond::BEGINDASH)) {
-        wedgedAtoms.set(bond->getBeginAtomIdx());
+    for (uint32_t bondIdx = 0, nbnds = uint32_t(bondVec.size()); bondIdx < nbnds;
+         ++bondIdx) {
+      const BondData &bond = bondVec[bondIdx];
+      if (bondsToUse[bondIdx] &&
+          (bond.getBondDir() == BondEnums::BondDir::BEGINWEDGE ||
+           bond.getBondDir() == BondEnums::BondDir::BEGINDASH)) {
+        wedgedAtoms.set(bond.getBeginAtomIdx());
       }
     }
 
@@ -664,12 +676,24 @@ void KekulizeFragment(RWMol &mol, const boost::dynamic_bitset<> &atomsToUse,
 
     // first find all the simple rings in the molecule that are not
     // completely composed of dummy atoms
-    VECT_INT_VECT allringsSSSR;
-    if (!mol.getRingInfo()->isInitialized()) {
-      MolOps::findSSSR(mol, allringsSSSR);
+    if (!mol.getRingInfo().isInitialized()) {
+      MolOps::findSSSR(mol, mol.getRingInfo());
     }
-    const VECT_INT_VECT &allrings =
-        allringsSSSR.empty() ? mol.getRingInfo()->atomRings() : allringsSSSR;
+    // Build the rings vector-of-vectors view from the native CSR ring info.
+    const RingInfoCache &ringInfoCache = mol.getRingInfo();
+    VECT_INT_VECT allrings;
+    allrings.reserve(ringInfoCache.numRings());
+    for (uint32_t ri = 0, nRings = ringInfoCache.numRings(); ri < nRings;
+         ++ri) {
+      const uint32_t rb = ringInfoCache.ringBegins[ri];
+      const uint32_t re = ringInfoCache.ringBegins[ri + 1];
+      INT_VECT ring(re - rb);
+      for (uint32_t pos = rb; pos < re; ++pos) {
+        ring[pos - rb] = int(ringInfoCache.atomsInRings[pos]);
+      }
+      allrings.push_back(std::move(ring));
+    }
+
     std::deque<INT_VECT> tmpRings;
     auto containsNonDummy = [&atomsToUse, &dummyAts](const INT_VECT &ring) {
       bool ringOk = false;
@@ -747,7 +771,7 @@ void KekulizeFragment(RWMol &mol, const boost::dynamic_bitset<> &atomsToUse,
       VECT_INT_VECT frings(fused.size());
       std::transform(fused.begin(), fused.end(), frings.begin(),
                      [&arings](const int ri) { return arings[ri]; });
-      kekulizeFused(mol.asRDMol(), frings, atomRanks, maxBackTracks);
+      kekulizeFused(mol, frings, atomRanks, maxBackTracks);
       int rix;
       for (rix = 0; rix < cnrs; ++rix) {
         if (!fusDone[rix]) {
@@ -763,34 +787,38 @@ void KekulizeFragment(RWMol &mol, const boost::dynamic_bitset<> &atomsToUse,
   if (markAtomsBonds) {
     // if we want the atoms and bonds to be marked non-aromatic do
     // that here.
-    if (!mol.getRingInfo()->isInitialized()) {
-      MolOps::findSSSR(mol);
+    if (!mol.getRingInfo().isInitialized()) {
+      MolOps::findSSSR(mol, mol.getRingInfo());
     }
-    for (auto bond : mol.bonds()) {
-      if (bondsToUse[bond->getIdx()]) {
-        bond->setIsAromatic(false);
+    auto &atomVec = mol.getAtomDataVector();
+    for (uint32_t bondIdx = 0, nbnds = uint32_t(bondVec.size());
+         bondIdx < nbnds; ++bondIdx) {
+      if (bondsToUse[bondIdx]) {
+        bondVec[bondIdx].setIsAromatic(false);
       }
     }
-    for (auto atom : mol.atoms()) {
-      if (atomsToUse[atom->getIdx()] && atom->getIsAromatic()) {
+    const RingInfoCache &ringInfoCache = mol.getRingInfo();
+    for (uint32_t atomIdx = 0; atomIdx < numAtoms; ++atomIdx) {
+      AtomData &atom = atomVec[atomIdx];
+      if (atomsToUse[atomIdx] && atom.getIsAromatic()) {
         // if we're doing the full molecule and there are aromatic atoms not in
         // a ring, throw an exception
         if (atomsToUse.all() && bondsToUse.all() &&
-            !mol.getRingInfo()->numAtomRings(atom->getIdx())) {
+            !ringInfoCache.numAtomRings(atomIdx)) {
           std::ostringstream errout;
-          errout << "non-ring atom " << atom->getIdx() << " marked aromatic";
+          errout << "non-ring atom " << atomIdx << " marked aromatic";
           auto msg = errout.str();
           BOOST_LOG(rdErrorLog) << msg << std::endl;
-          throw AtomKekulizeException(msg, atom->getIdx());
+          throw AtomKekulizeException(msg, atomIdx);
         }
-        atom->setIsAromatic(false);
+        atom.setIsAromatic(false);
         // make sure "explicit" Hs on things like pyrroles don't hang around
         // this was Github Issue 141
-        if ((atom->getAtomicNum() == 7 || atom->getAtomicNum() == 15) &&
-            atom->getFormalCharge() == 0 && atom->getNumExplicitHs() == 1) {
-          atom->setNoImplicit(false);
-          atom->setNumExplicitHs(0);
-          atom->updatePropertyCache(false);
+        if ((atom.getAtomicNum() == 7 || atom.getAtomicNum() == 15) &&
+            atom.getFormalCharge() == 0 && atom.getNumExplicitHs() == 1) {
+          atom.setNoImplicit(false);
+          atom.setNumExplicitHs(0);
+          mol.updateAtomPropertyCache(atomIdx, false);
         }
       }
     }
@@ -799,23 +827,32 @@ void KekulizeFragment(RWMol &mol, const boost::dynamic_bitset<> &atomsToUse,
   // ok some error checking here force a implicit valence
   // calculation that should do some error checking by itself. In
   // addition compare them to what they were before kekulizing
-  for (auto atom : mol.atoms()) {
-    if (!atomsToUse[atom->getIdx()]) {
+  for (uint32_t atomIdx = 0; atomIdx < numAtoms; ++atomIdx) {
+    if (!atomsToUse[atomIdx]) {
       continue;
     }
-    int val = atom->getTotalValence();
-    if (val != valences[atom->getIdx()]) {
+    const AtomData &atom = mol.getAtom(atomIdx);
+    const int val = int(atom.getValence(AtomData::ValenceType::EXPLICIT) +
+                        atom.getValence(AtomData::ValenceType::IMPLICIT));
+    if (val != valences[atomIdx]) {
       std::ostringstream errout;
-      errout << "Kekulization somehow screwed up valence on " << atom->getIdx()
-             << ": " << val << "!=" << valences[atom->getIdx()] << std::endl;
+      errout << "Kekulization somehow screwed up valence on " << atomIdx
+             << ": " << val << "!=" << valences[atomIdx] << std::endl;
       auto msg = errout.str();
       BOOST_LOG(rdErrorLog) << msg << std::endl;
-      throw AtomKekulizeException(msg, atom->getIdx());
+      throw AtomKekulizeException(msg, atomIdx);
     }
   }
 }
+
+void KekulizeFragment(RWMol &mol, const boost::dynamic_bitset<> &atomsToUse,
+                      boost::dynamic_bitset<> bondsToUse, bool markAtomsBonds,
+                      bool canonical, unsigned int maxBackTracks) {
+  KekulizeFragment(mol.asRDMol(), atomsToUse, std::move(bondsToUse),
+                   markAtomsBonds, canonical, maxBackTracks);
+}
 }  // namespace details
-void Kekulize(RWMol &mol, bool markAtomsBonds, bool canonical,
+void Kekulize(RDMol &mol, bool markAtomsBonds, bool canonical,
               unsigned int maxBackTracks) {
   boost::dynamic_bitset<> atomsToUse(mol.getNumAtoms());
   atomsToUse.set();
@@ -824,18 +861,27 @@ void Kekulize(RWMol &mol, bool markAtomsBonds, bool canonical,
   details::KekulizeFragment(mol, atomsToUse, bondsToUse, markAtomsBonds,
                             canonical, maxBackTracks);
 }
-bool KekulizeIfPossible(RWMol &mol, bool markAtomsBonds, bool canonical,
+
+void Kekulize(RWMol &mol, bool markAtomsBonds, bool canonical,
+              unsigned int maxBackTracks) {
+  Kekulize(mol.asRDMol(), markAtomsBonds, canonical, maxBackTracks);
+}
+
+bool KekulizeIfPossible(RDMol &mol, bool markAtomsBonds, bool canonical,
                         unsigned int maxBackTracks) {
-  boost::dynamic_bitset<> aromaticBonds(mol.getNumBonds());
-  for (const auto bond : mol.bonds()) {
-    if (bond->getIsAromatic()) {
-      aromaticBonds.set(bond->getIdx());
+  auto &bondVec = mol.getBondDataVector();
+  boost::dynamic_bitset<> aromaticBonds(bondVec.size());
+  for (uint32_t bondIdx = 0, nbnds = uint32_t(bondVec.size()); bondIdx < nbnds;
+       ++bondIdx) {
+    if (bondVec[bondIdx].getIsAromatic()) {
+      aromaticBonds.set(bondIdx);
     }
   }
   boost::dynamic_bitset<> aromaticAtoms(mol.getNumAtoms());
-  for (const auto atom : mol.atoms()) {
-    if (isAromaticAtom(*atom)) {
-      aromaticAtoms.set(atom->getIdx());
+  for (uint32_t atomIdx = 0, numAtoms = mol.getNumAtoms(); atomIdx < numAtoms;
+       ++atomIdx) {
+    if (mol.isAromaticAtom(atomIdx)) {
+      aromaticAtoms.set(atomIdx);
     }
   }
   bool res = true;
@@ -843,20 +889,27 @@ bool KekulizeIfPossible(RWMol &mol, bool markAtomsBonds, bool canonical,
     Kekulize(mol, markAtomsBonds, canonical, maxBackTracks);
   } catch (const MolSanitizeException &) {
     res = false;
-    for (unsigned int i = 0; i < mol.getNumBonds(); ++i) {
+    for (uint32_t i = 0, nbnds = uint32_t(bondVec.size()); i < nbnds; ++i) {
       if (aromaticBonds[i]) {
-        auto bond = mol.getBondWithIdx(i);
-        bond->setIsAromatic(true);
-        bond->setBondType(Bond::BondType::AROMATIC);
+        BondData &bond = bondVec[i];
+        bond.setIsAromatic(true);
+        bond.setBondType(BondEnums::BondType::AROMATIC);
       }
     }
-    for (unsigned int i = 0; i < mol.getNumAtoms(); ++i) {
+    auto &atomVec = mol.getAtomDataVector();
+    for (uint32_t i = 0, nats = uint32_t(atomVec.size()); i < nats; ++i) {
       if (aromaticAtoms[i]) {
-        mol.getAtomWithIdx(i)->setIsAromatic(true);
+        atomVec[i].setIsAromatic(true);
       }
     }
   }
   return res;
+}
+
+bool KekulizeIfPossible(RWMol &mol, bool markAtomsBonds, bool canonical,
+                        unsigned int maxBackTracks) {
+  return KekulizeIfPossible(mol.asRDMol(), markAtomsBonds, canonical,
+                            maxBackTracks);
 }
 }  // namespace MolOps
 }  // namespace RDKit
