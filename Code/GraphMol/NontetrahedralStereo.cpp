@@ -469,15 +469,20 @@ Atom *getTrigonalBipyramidalAxialAtom(const Atom *cen, int axial) {
   auto bnd = getTrigonalBipyramidalAxialBond(cen, axial);
   return bnd ? bnd->getOtherAtom(cen) : nullptr;
 }
+bool hasNonTetrahedralStereo(const AtomData &cen) {
+  auto tag = cen.getChiralTag();
+  return tag == AtomEnums::ChiralType::CHI_SQUAREPLANAR ||
+         tag == AtomEnums::ChiralType::CHI_TRIGONALBIPYRAMIDAL ||
+         tag == AtomEnums::ChiralType::CHI_OCTAHEDRAL;
+}
+
 bool hasNonTetrahedralStereo(const Atom *cen) {
   PRECONDITION(cen, "bad center pointer");
   if (!cen->hasOwningMol()) {
     return false;
   }
-  auto tag = cen->getChiralTag();
-  return tag == Atom::ChiralType::CHI_SQUAREPLANAR ||
-         tag == Atom::ChiralType::CHI_TRIGONALBIPYRAMIDAL ||
-         tag == Atom::ChiralType::CHI_OCTAHEDRAL;
+  return hasNonTetrahedralStereo(
+      cen->getOwningMol().asRDMol().getAtom(cen->getIdx()));
 }
 
 unsigned int getChiralPermutation(const Atom *cen, const INT_LIST &probe,

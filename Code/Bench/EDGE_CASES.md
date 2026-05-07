@@ -65,6 +65,17 @@ clearSingleBondDirFlags (commit 7a86e1eeb)
 setConjugation, setHybridization, adjustHs (commit c3cdb3146)
   These run on every atom/bond on every sample. Measurements representative.
 
+hasNonTetrahedralStereo (commit pending)
+  Predicate: returns true iff the atom has CHI_SQUAREPLANAR /
+  CHI_TRIGONALBIPYRAMIDAL / CHI_OCTAHEDRAL chirality. Canonical SMILES
+  for organic molecules only generates these for explicitly tagged
+  square-planar/trigonal-bipyramidal/octahedral centers (rare, usually
+  metal complexes). The canonical bench set has none.
+
+  Because the function is a single read + 3-way compare on a chiral tag,
+  no dedicated per-function bench. Coverage comes from chiralityTestsCatch
+  and nontetrahedralCatch which both pass.
+
 cleanupChirality (commit pending)
   Trigger: atoms with a chiral tag where the chirality is structurally
   invalid -- specifically, sp/sp2 hybridized atoms with CHI_TETRAHEDRAL[_CW/CCW]
