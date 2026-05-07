@@ -1,3 +1,23 @@
+# Release_2026.09.1
+(Changes relative to Release_2026.03.1)
+
+## Acknowledgements
+(Note: I'm no longer attempting to manually curate names. If you would like to
+see your contribution acknowledged with your name, please set your name in
+GitHub)
+
+## Highlights
+
+## Backwards incompatible changes:
+- Since #9208, atom rings are "normalized" so that the first atom in the ring
+definition is the one with the lowest index, and the second one is the neighbor
+to the first which also has the lowest index.
+
+## Code removed in this release:
+
+## Deprecated code (to be removed in a future release):
+
+
 # Release_2026.03.1
 (Changes relative to Release_2025.09.1)
 
@@ -6,7 +26,24 @@
 see your contribution acknowledged with your name, please set your name in
 GitHub)
 
+Jakub Adamczyk, Rody Arantes, Kevin Boyd, Jessica Braun, Katharina Buchthal,
+Jackson Burns, Chi Cheng, David Cosgrove, Andrew Dirksen, Sergey Fedorov, Justin
+Gullingsrud, Tad Hurst, Lauriane Jacot-Descombes, Gareth Jones, Eisuke
+Kawashima, Brian Kelley, Joos Kiener, Jimmy Kromann, Phong Lam, Niels Maeder,
+Josh A. Mitchell, Dan Nealschneider, Yakov Pechersky, Patrick Penner, Paul
+Pillot, Rachael Pirie, Eliot Ragueneau, Max Rietmann, Pat Riley, Ricardo
+Rodriguez, Lukas Sigmund, Anton Siomchen, Raul Sofia, Matt Swain, Paolo Tosco,
+Ivan Tubert-Brohman, Philip Ullmann, Chris Von Bargen, Rachel Walker, Nic Zonta,
+空酱, dkranthi221, EvaSnow, Pavel, stephenting22, Paul, paconius, spparel,
+wszqkzqk, Diogo, dehaenw
+
 ## Highlights
+- A significant number of known SMILES canonicalization problems were resolved.
+- It's now possible to provide your own matching functions to supplement or
+  replace the defaults when doing substructure matching.
+- An experimental new implementation of shape-based alignment using Gaussians.
+- Improvements to the molecular templates for 2D depiction and handling of
+  macrocycles in the templates.
 
 ## Backwards incompatible changes:
 

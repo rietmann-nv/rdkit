@@ -686,12 +686,12 @@ RWMol *makeCliqueFrags(const ROMol &mol,
     bond->getEndAtom()->setProp<int>("ORIG_INDEX", bond->getEndAtomIdx());
   }
   molFrags->beginBatchEdit();
-  for (auto &a : molFrags->atoms()) {
+  for (auto a : molFrags->atoms()) {
     if (!aInClique[a->getIdx()]) {
       molFrags->removeAtom(a);
     }
   }
-  for (auto &b : molFrags->bonds()) {
+  for (auto b : molFrags->bonds()) {
     if (!bInClique[b->getIdx()]) {
       molFrags->removeBond(b->getBeginAtomIdx(), b->getEndAtomIdx());
     }

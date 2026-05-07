@@ -688,7 +688,7 @@ std::vector<std::unique_ptr<MolSanitizeException>> detectChemistryProblems(
   // update computed properties on atoms and bonds:
   operation = SANITIZE_PROPERTIES;
   if (sanitizeOps & operation) {
-    for (auto &atom : mol.atoms()) {
+    for (auto atom : mol.atoms()) {
       try {
         bool strict = true;
         atom->updatePropertyCache(strict);
@@ -1069,12 +1069,11 @@ template RDKIT_GRAPHMOL_EXPORT unsigned int getMolFragsWithQuery(
     bool sanitizeFrags, const std::vector<unsigned int> *, bool);
 
 int getFormalCharge(const ROMol &mol) {
-  int accum = 0;
-  for (ROMol::ConstAtomIterator atomIt = mol.beginAtoms();
-       atomIt != mol.endAtoms(); ++atomIt) {
-    accum += (*atomIt)->getFormalCharge();
-  }
-  return accum;
+  auto res = std::accumulate(mol.atoms().begin(), mol.atoms().end(), 0,
+                             [](int accum, const auto atom) {
+                               return accum + atom->getFormalCharge();
+                             });
+  return res;
 };
 
 unsigned getNumAtomsWithDistinctProperty(const ROMol &mol,

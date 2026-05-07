@@ -478,13 +478,13 @@ void addSingleAbsGroup(ROMol &mol) {
   std::vector<StereoGroup> sgs;
   std::vector<Atom *> chiralAtoms;
   std::vector<Bond *> chiralBonds;
-  for (auto &atom : mol.atoms()) {
+  for (auto atom : mol.atoms()) {
     if (atom->getChiralTag() == Atom::ChiralType::CHI_TETRAHEDRAL_CCW ||
         atom->getChiralTag() == Atom::ChiralType::CHI_TETRAHEDRAL_CW) {
       chiralAtoms.push_back(atom);
     }
   }
-  for (auto &bond : mol.bonds()) {
+  for (auto bond : mol.bonds()) {
     if (bond->getStereo() == Bond::BondStereo::STEREOATROPCW ||
         bond->getStereo() == Bond::BondStereo::STEREOATROPCCW) {
       chiralBonds.push_back(bond);
@@ -908,7 +908,7 @@ void canonicalizeStereoGroups(std::unique_ptr<ROMol> &mol,
     if (sgats.size() <= 2 && sgBonds.size() == 0) {
       bool isSimple = true;
 
-      for (auto &atom : mol->atoms()) {
+      for (auto atom : mol->atoms()) {
         if ((atom->getChiralTag() == Atom::ChiralType::CHI_TETRAHEDRAL_CCW ||
              atom->getChiralTag() == Atom::ChiralType::CHI_TETRAHEDRAL_CW) &&
             std::find(sgats.begin(), sgats.end(), atom) == sgats.end()) {
@@ -917,7 +917,7 @@ void canonicalizeStereoGroups(std::unique_ptr<ROMol> &mol,
         }
       }
       if (isSimple) {
-        for (auto &bond : mol->bonds()) {
+        for (auto bond : mol->bonds()) {
           if ((bond->getStereo() == Bond::BondStereo::STEREOATROPCW ||
                bond->getStereo() == Bond::BondStereo::STEREOATROPCCW) &&
               std::find(sgBonds.begin(), sgBonds.end(), bond) ==

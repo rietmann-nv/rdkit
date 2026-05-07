@@ -356,30 +356,58 @@ PyObject *GetProp(const RDOb *ob, const std::string &key) {
   return rawPy(std::move(res));
 }
 
+template <class RDOb, class T>
+PyObject *GetPropOrDefault(const RDOb *ob, const std::string &key,
+                           T default_val) {
+  T res;
+  try {
+    if (!ob->getPropIfPresent(key, res)) {
+      return rawPy(std::move(default_val));
+    }
+  } catch (const std::exception &e) {
+    auto msg = std::string("key `") + key + "` exists but does not result in " +
+               GetTypeName<T>() + " reason: " + e.what();
+    PyErr_SetString(PyExc_ValueError, msg.c_str());
+    return nullptr;
+  }
+  return rawPy(std::move(res));
+}
+
 template <class RDOb>
 python::object autoConvertString(const RDOb *ob, const std::string &key) {
   int ivalue;
   double dvalue;
   std::string svalue;
 
-  if (ob->getPropIfPresent(key, ivalue)) {
-    return python::object(ivalue);
-  } else if (ob->getPropIfPresent(key, dvalue)) {
-    return python::object(dvalue);
-  } else if (ob->getPropIfPresent(key, svalue)) {
+  try {
+    if (ob->getPropIfPresent(key, ivalue)) {
+      return python::object(ivalue);
+    }
+  } catch (const std::bad_any_cast &) {}
+
+  try {
+    if (ob->getPropIfPresent(key, dvalue)) {
+      return python::object(dvalue);
+    }
+  } catch (const std::bad_any_cast &) {}
+
+  if (ob->getPropIfPresent(key, svalue)) {
     return python::object(svalue);
   }
 
   return python::object();
 }
 
+// nullptr = raise KeyError; non-null = return *default_val_ptr as fallback
 template <class RDOb>
-PyObject *GetPyProp(const RDOb *obj, const std::string &key, bool autoConvert) {
-  // When autoConvert=False (default), always return as string to match legacy behavior
+PyObject *GetPyPropImpl(const RDOb *obj, const std::string &key,
+                        bool autoConvert, python::object *default_val_ptr) {
   if (!autoConvert) {
     std::string res;
     if (obj->getPropIfPresent(key, res)) {
       return rawPy(res);
+    } else if (default_val_ptr && !obj->hasProp(key)) {
+      return rawPy(*default_val_ptr);
     } else {
       PyErr_SetString(PyExc_KeyError, key.c_str());
       return nullptr;
@@ -452,7 +480,11 @@ PyObject *GetPyProp(const RDOb *obj, const std::string &key, bool autoConvert) {
           }
         }
       }
-      // Property not found via getDict
+      // Property not found via getDict. AnyTag entries fall through here too,
+      // since they can't be converted.
+      if (default_val_ptr && !obj->hasProp(key)) {
+        return rawPy(*default_val_ptr);
+      }
       PyErr_SetString(PyExc_KeyError, key.c_str());
       return nullptr;
     } catch (...) {
@@ -460,42 +492,42 @@ PyObject *GetPyProp(const RDOb *obj, const std::string &key, bool autoConvert) {
     }
   }
 
-  // When autoConvert=True, try native types first
+  // When autoConvert=True and getDict() is not available, try native types.
   // Try unsigned int BEFORE int to avoid overflow in getPropIfPresent conversion
   try {
     unsigned int v;
     if (obj->getPropIfPresent(key, v)) {
       return rawPy(v);
     }
-  } catch (...) {}  // Catch all exceptions
+  } catch (...) {}
 
   try {
     int v;
     if (obj->getPropIfPresent(key, v)) {
       return rawPy(v);
     }
-  } catch (...) {}  // Catch all exceptions
+  } catch (...) {}
 
   try {
     double v;
     if (obj->getPropIfPresent(key, v)) {
       return rawPy(v);
     }
-  } catch (...) {}  // Catch all exceptions
+  } catch (...) {}
 
   try {
     bool v;
     if (obj->getPropIfPresent(key, v)) {
       return rawPy(v);
     }
-  } catch (...) {}  // Catch all exceptions
+  } catch (...) {}
 
   try {
     float v;
     if (obj->getPropIfPresent(key, v)) {
       return rawPy(v);
     }
-  } catch (...) {}  // Catch all exceptions
+  } catch (...) {}
 
   // Try vectors before string to avoid implicit vector->string conversion
   // Try unsigned vectors before signed to avoid overflow in getPropIfPresent
@@ -504,37 +536,36 @@ PyObject *GetPyProp(const RDOb *obj, const std::string &key, bool autoConvert) {
     if (obj->getPropIfPresent(key, v)) {
       return rawPy(v);
     }
-  } catch (...) {}  // Catch all exceptions
+  } catch (...) {}
 
   try {
     std::vector<double> v;
     if (obj->getPropIfPresent(key, v)) {
       return rawPy(v);
     }
-  } catch (...) {}  // Catch all exceptions
+  } catch (...) {}
 
   try {
     std::vector<float> v;
     if (obj->getPropIfPresent(key, v)) {
       return rawPy(v);
     }
-  } catch (...) {}  // Catch all exceptions
+  } catch (...) {}
 
   try {
     std::vector<int> v;
     if (obj->getPropIfPresent(key, v)) {
       return rawPy(v);
     }
-  } catch (...) {}  // Catch all exceptions
+  } catch (...) {}
 
   try {
     std::vector<std::string> v;
     if (obj->getPropIfPresent(key, v)) {
       return rawPy(v);
     }
-  } catch (...) {}  // Catch all exceptions
+  } catch (...) {}
 
-  // Try string last with autoConvert for numeric strings
   try {
     std::string v;
     if (obj->getPropIfPresent(key, v)) {
@@ -550,11 +581,25 @@ PyObject *GetPyProp(const RDOb *obj, const std::string &key, bool autoConvert) {
       }
       return rawPy(v);
     }
-  } catch (...) {}  // Catch all exceptions
+  } catch (...) {}
 
-  // Property not found
+  // Property not found via fallback either.
+  if (default_val_ptr && !obj->hasProp(key)) {
+    return rawPy(*default_val_ptr);
+  }
   PyErr_SetString(PyExc_KeyError, key.c_str());
   return nullptr;
+}
+
+template <class RDOb>
+PyObject *GetPyProp(const RDOb *obj, const std::string &key, bool autoConvert) {
+  return GetPyPropImpl(obj, key, autoConvert, nullptr);
+}
+
+template <class RDOb>
+PyObject *GetPyPropOrDefault(const RDOb *obj, const std::string &key,
+                              bool autoConvert, python::object default_val) {
+  return GetPyPropImpl(obj, key, autoConvert, &default_val);
 }
 
 // Return policy for functions that directly return a PyObject* and

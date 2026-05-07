@@ -471,7 +471,7 @@ TEST_CASE("Molzip with 2D coordinates", "[molzip]") {
   params.generateCoordinates = true;
   const auto zippedMol = molzip(mols, params);
   for (auto &mol : mols) {
-    for (auto &atom : mol->atoms()) {
+    for (auto atom : mol->atoms()) {
       atom->setIsotope(0);
       atom->setAtomMapNum(0);
     }

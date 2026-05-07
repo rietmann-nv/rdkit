@@ -106,7 +106,7 @@ std::string MolToChemDrawBlock(const ROMol &mol, CDXFormat format) {
 
   auto wedgeBonds = Chirality::pickBondsToWedge(trmol, nullptr, conf);
 
-  for (auto &atom : trmol.atoms()) {
+  for (auto atom : trmol.atoms()) {
     auto *node = new CDXNode(object_id + atom->getIdx());
     auto pos = conf->getAtomPos(atom->getIdx());
     if (is3D) {
@@ -171,7 +171,7 @@ std::string MolToChemDrawBlock(const ROMol &mol, CDXFormat format) {
     fragment->AddChild(node);
   }
 
-  for (auto &bond : trmol.bonds()) {
+  for (auto bond : trmol.bonds()) {
     auto *cdxbond = new CDXBond(object_id + mol.getNumAtoms() + bond->getIdx());
 
     int dirCode = 0;

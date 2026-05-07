@@ -320,14 +320,14 @@ TEST_CASE("Oxidation numbers") {
       RDKit::MolOps::Kekulize(m2);
       std::vector<int> expected{-3, -1, -2, 0, 2, -3, -1, -2, 0, -1, -1, 2};
       Descriptors::calcOxidationNumbers(m2);
-      for (auto &a : m2.atoms()) {
+      for (auto a : m2.atoms()) {
         CHECK(a->getProp<int>(common_properties::OxidationNumber) ==
               expected[a->getIdx()]);
       }
       RDKit::MolOps::hapticBondsToDative(m2);
       Descriptors::calcOxidationNumbers(m2);
       std::vector<int> expectedNoDummies{-3, -1, -2, 2, -3, -1, -2, -1, -1, 2};
-      for (auto &a : m2.atoms()) {
+      for (auto a : m2.atoms()) {
         CHECK(a->getProp<int>(common_properties::OxidationNumber) ==
               expectedNoDummies[a->getIdx()]);
       }

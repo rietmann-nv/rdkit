@@ -23,6 +23,8 @@
 #include <iterator>
 #include <utility>
 #include <map>
+#include <ranges>
+#include <limits>
 
 // boost stuff
 #include <RDGeneral/BoostStartInclude.h>
@@ -115,31 +117,73 @@ struct CXXAtomIterator {
   Iterator vstart, vend;
 
   struct CXXAtomIter {
-    using iterator_category = std::forward_iterator_tag;
+    using iterator_category = std::random_access_iterator_tag;
     using difference_type = std::ptrdiff_t;
     using value_type = Vertex;
     using pointer = Vertex *;
     using reference = Vertex &;
+    using const_reference = Vertex const &;
 
-    Graph *graph;
+    Graph *graph = nullptr;
     Iterator pos;
-    value_type current;
 
-    CXXAtomIter(Graph *graph, Iterator pos)
-        : graph(graph), pos(pos), current(nullptr) {}
+    CXXAtomIter() {};
+    CXXAtomIter(Graph *g, Iterator p) : graph(g), pos(p) {}
 
-    const value_type &operator*() {
-      // The const_cast is to maintain the same behaviour as the previous
-      // interface.
-      current = const_cast<value_type>((*graph)[*pos]);
-      return current;
+    value_type operator*() const {
+      return const_cast<value_type>((*graph)[*pos]);
     }
+
     CXXAtomIter &operator++() {
       ++pos;
       return *this;
     }
-    bool operator==(const CXXAtomIter &it) const { return pos == it.pos; }
-    bool operator!=(const CXXAtomIter &it) const { return pos != it.pos; }
+    CXXAtomIter operator++(int) {
+      CXXAtomIter tmp = *this;
+      ++(*this);
+      return tmp;
+    }
+    CXXAtomIter &operator--() {
+      --pos;
+      return *this;
+    }
+    CXXAtomIter operator+(difference_type n) const {
+      return CXXAtomIter(graph, pos + n);
+    }
+    CXXAtomIter operator-(difference_type n) const {
+      return CXXAtomIter(graph, pos - n);
+    }
+
+    CXXAtomIter operator--(int) {
+      CXXAtomIter tmp = *this;
+      --(*this);
+      return tmp;
+    }
+    CXXAtomIter &operator+=(difference_type n) {
+      pos += n;
+      return *this;
+    }
+    CXXAtomIter &operator-=(difference_type n) {
+      pos -= n;
+      return *this;
+    }
+    difference_type operator-(const CXXAtomIter &other) const {
+      return pos - other.pos;
+    }
+    friend CXXAtomIter operator+(difference_type n, const CXXAtomIter &it) {
+      return CXXAtomIter(it.graph, it.pos + n);
+    }
+
+    bool operator==(const CXXAtomIter &other) const {
+      return graph == other.graph && pos == other.pos;
+    }
+    bool operator!=(const CXXAtomIter &other) const {
+      return !(*this == other);
+    }
+    bool operator<(const CXXAtomIter &other) const { return pos < other.pos; }
+    bool operator<=(const CXXAtomIter &other) const { return pos <= other.pos; }
+    bool operator>(const CXXAtomIter &other) const { return pos > other.pos; }
+    bool operator>=(const CXXAtomIter &other) const { return pos >= other.pos; }
   };
 
   CXXAtomIterator(Graph *graph) : graph(graph) {
@@ -151,6 +195,7 @@ struct CXXAtomIterator {
       : graph(graph), vstart(start), vend(end) {};
   CXXAtomIter begin() { return {graph, vstart}; }
   CXXAtomIter end() { return {graph, vend}; }
+  size_t size() const { return vend - vstart; }
 };
 
 template <class Graph, class Edge,
@@ -160,31 +205,46 @@ struct CXXBondIterator {
   Iterator vstart, vend;
 
   struct CXXBondIter {
-    using iterator_category = std::forward_iterator_tag;
+    using iterator_category = std::bidirectional_iterator_tag;
     using difference_type = std::ptrdiff_t;
     using value_type = Edge;
     using pointer = Edge *;
     using reference = Edge &;
+    using const_reference = Edge const &;
 
-    Graph *graph;
+    Graph *graph = nullptr;
     Iterator pos;
-    value_type current;
 
-    CXXBondIter(Graph *graph, Iterator pos)
-        : graph(graph), pos(pos), current(nullptr) {}
+    CXXBondIter() {};
+    CXXBondIter(Graph *g, Iterator p) : graph(g), pos(p) {}
 
-    const value_type &operator*() {
-      // The const_cast is to maintain the same behaviour as the previous
-      // interface.
-      current = const_cast<value_type>((*graph)[*pos]);
-      return current;
+    value_type operator*() const {
+      return const_cast<value_type>((*graph)[*pos]);
     }
     CXXBondIter &operator++() {
       ++pos;
       return *this;
     }
-    bool operator==(const CXXBondIter &it) const { return pos == it.pos; }
-    bool operator!=(const CXXBondIter &it) const { return pos != it.pos; }
+    CXXBondIter operator++(int) {
+      CXXBondIter tmp = *this;
+      ++(*this);
+      return tmp;
+    }
+    CXXBondIter &operator--() {
+      --pos;
+      return *this;
+    }
+    CXXBondIter operator--(int) {
+      CXXBondIter tmp = *this;
+      --(*this);
+      return tmp;
+    }
+    bool operator==(const CXXBondIter &other) const {
+      return graph == other.graph && pos == other.pos;
+    }
+    bool operator!=(const CXXBondIter &other) const {
+      return !(*this == other);
+    }
   };
 
   CXXBondIterator(Graph *graph) : graph(graph) {
@@ -196,6 +256,15 @@ struct CXXBondIterator {
       : graph(graph), vstart(start), vend(end) {};
   CXXBondIter begin() { return {graph, vstart}; }
   CXXBondIter end() { return {graph, vend}; }
+  size_t size() const {
+    // bond iterators aren't random access, so we can't just do vend - vstart
+    // here. Instead we have to iterate through;
+    size_t count = 0;
+    for (auto it = vstart; it != vend; ++it) {
+      ++count;
+    }
+    return count;
+  }
 };
 
 class RDKIT_GRAPHMOL_EXPORT ROMol {
@@ -1183,6 +1252,7 @@ class RDKIT_GRAPHMOL_EXPORT ROMol {
 
  protected:
 #ifndef WIN32
+
  private:
 #endif
 

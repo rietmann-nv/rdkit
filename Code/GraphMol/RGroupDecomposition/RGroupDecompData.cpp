@@ -301,7 +301,7 @@ bool RGroupDecompData::replaceHydrogenCoreDummy(const RGroupMatch &match,
   if (const auto group = match.rgroups.find(currentLabel);
       group != match.rgroups.end()) {
     if (group->second->is_hydrogen) {
-      for (auto &neighbor : core.atomNeighbors(&atom)) {
+      for (auto neighbor : core.atomNeighbors(&atom)) {
         if (neighbor->getAtomicNum() == 1) {
           neighbor->setAtomicNum(0);
           setRlabel(neighbor, rLabel);
@@ -467,9 +467,7 @@ void RGroupDecompData::relabelRGroup(RGroupData &rgroup,
   std::vector<std::pair<Atom *, int>> newAtomsToLabel;  // track rlabels for new atoms
   std::map<int, int> rLabelCoreIndexToAtomicWt;
 
-  for (RWMol::AtomIterator atIt = mol.beginAtoms(); atIt != mol.endAtoms();
-       ++atIt) {
-    Atom *atom = *atIt;
+  for (auto atom : mol.atoms()) {
     if (atom->hasProp(SIDECHAIN_RLABELS)) {
       atom->setIsotope(0);
       const std::vector<int> &rlabels =

@@ -7028,7 +7028,7 @@ void run_gist_reaction_tests(const std::vector<RWMOL_SPTR> &mols) {
 }
 
 void strip_bond_directions(RWMOL_SPTR &mol) {
-  for (auto &bond : mol->bonds()) {
+  for (auto bond : mol->bonds()) {
     if (bond->getBondDir() == Bond::BondDir::ENDDOWNRIGHT ||
         bond->getBondDir() == Bond::BondDir::ENDUPRIGHT) {
       bond->setBondDir(Bond::BondDir::NONE);

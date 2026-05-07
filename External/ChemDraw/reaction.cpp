@@ -149,7 +149,7 @@ void ReactionInfo::set_reaction_steps(
     for (auto &mol : mols) {
       auto idx = mol->getProp<unsigned int>(CDX_FRAG_ID);
       fragments[idx] = mol_idx++;
-      for (auto &atom : mol->atoms()) {
+      for (auto atom : mol->atoms()) {
         auto idx = atom->getProp<unsigned int>(CDX_ATOM_ID);
         atoms[idx] = atom;
       }

@@ -427,11 +427,11 @@ struct SelectedComponents {
 // helper api to get test mol for copyMolSubset api.
 static std::unique_ptr<RDKit::RWMol> getTestMol() {
   std::unique_ptr<RDKit::RWMol> mol{RDKit::SmilesToMol("CCCCCCCCCCCCCCC")};
-  for (auto &atom : mol->atoms()) {
+  for (auto atom : mol->atoms()) {
     atom->setProp("orig_idx", atom->getIdx());
   }
 
-  for (auto &bond : mol->bonds()) {
+  for (auto bond : mol->bonds()) {
     bond->setProp("orig_idx", bond->getIdx());
   }
 
@@ -451,7 +451,7 @@ static std::unique_ptr<RDKit::RWMol> getTestMol() {
   }
 
   std::vector<bool> selected_bonds(mol.getNumBonds());
-  for (auto &bond : mol.bonds()) {
+  for (auto bond : mol.bonds()) {
     if (selected_atoms[bond->getBeginAtomIdx()] &&
         selected_atoms[bond->getEndAtomIdx()]) {
       selected_bonds[bond->getIdx()] = true;
@@ -477,7 +477,7 @@ TEST_CASE("test_extract_atoms", "[copyMolSubset]") {
   REQUIRE(extracted_mol->getNumAtoms() == expected_atoms.size());
 
   std::vector<unsigned int> extracted_atoms;
-  for (auto &atom : extracted_mol->atoms()) {
+  for (auto atom : extracted_mol->atoms()) {
     extracted_atoms.push_back(atom->template getProp<unsigned int>("orig_idx"));
   }
 
@@ -487,11 +487,11 @@ TEST_CASE("test_extract_atoms", "[copyMolSubset]") {
 TEST_CASE("test_extract_bonds", "[copyMolSubset]") {
   auto test_mol = getTestMol();
 
-  for (auto &bond : test_mol->bonds()) {
+  for (auto bond : test_mol->bonds()) {
     bond->setProp("test_prop", true);
   }
 
-  for (auto &bond : test_mol->bonds()) {
+  for (auto bond : test_mol->bonds()) {
     auto begin_idx = bond->getBeginAtomIdx();
     auto end_idx = bond->getEndAtomIdx();
     auto m = copyMolSubset(*test_mol, {begin_idx, end_idx});

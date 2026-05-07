@@ -36,7 +36,7 @@
 #include <GraphMol/test_fixtures.h>
 #include <RDGeneral/FileParseException.h>
 #include <boost/algorithm/string.hpp>
-#include <GraphMol/rdmol_throw.h>
+
 using namespace RDKit;
 
 TEST_CASE("Basic SVG Parsing", "[SVG][reader]") {
@@ -4107,7 +4107,9 @@ M  V30 1 1 1 2
 M  V30 END BOND
 M  V30 END CTAB
 M  END)CTAB";
-    { REQUIRE_THROWS_AS(MolBlockToMol(ctab), FileParseException); }
+    {
+      REQUIRE_THROWS_AS(MolBlockToMol(ctab), FileParseException);
+    }
     {
       bool sanitize = true;
       bool removeHs = true;
@@ -6187,124 +6189,8 @@ TEST_CASE("MaeMolSupplier is3D flag", "[mae][MaeMolSupplier][reader]") {
   CHECK(mol->getConformer().is3D() == false);
 }
 
-// Helper function to check roundtripped properties for ROMol (using RDMol
-// backend)
-void check_roundtripped_properties(const ROMol &original,
-                                   const ROMol &roundtrip) {
-  auto includePrivate = false;
-  auto originalPropNames = original.getPropList(includePrivate, false);
-  auto roundtripPropNames = roundtrip.getPropList(includePrivate, false);
-
-  // We allow the roundtrip to add extra info, but the original
-  // properties must be present
-  REQUIRE(roundtripPropNames.size() >= originalPropNames.size());
-
-  std::sort(originalPropNames.begin(), originalPropNames.end());
-  std::sort(roundtripPropNames.begin(), roundtripPropNames.end());
-
-  REQUIRE(std::includes(roundtripPropNames.begin(), roundtripPropNames.end(),
-                        originalPropNames.begin(), originalPropNames.end()));
-
-  // Iterate through original properties using RDMol API
-  const auto &mol = original.asRDMol();
-  for (auto it = mol.beginProps(false, RDProperties::Scope::MOL, 0);
-       it != mol.endProps(); ++it) {
-    const auto &prop = *it;
-    std::string propName = prop.name().getString();
-
-    UNSCOPED_INFO("Checking property = " << propName);
-
-    auto tag = prop.getRDValueTag();
-    switch (tag) {
-      case RDTypeTag::BoolTag: {
-        bool origVal = original.getProp<bool>(propName);
-        CHECK(origVal == roundtrip.getProp<bool>(propName));
-        break;
-      }
-      case RDTypeTag::IntTag:
-      case RDTypeTag::UnsignedIntTag: {
-        int origVal = original.getProp<int>(propName);
-        CHECK(origVal == roundtrip.getProp<int>(propName));
-        break;
-      }
-      case RDTypeTag::DoubleTag:
-      case RDTypeTag::FloatTag: {
-        double origVal = original.getProp<double>(propName);
-        CHECK(origVal == roundtrip.getProp<double>(propName));
-        break;
-      }
-      case RDTypeTag::StringTag: {
-        std::string origVal = original.getProp<std::string>(propName);
-        CHECK(origVal == roundtrip.getProp<std::string>(propName));
-        break;
-      }
-      default:
-        // Skip unsupported types
-        break;
-    }
-  }
-}
-
-// Helper function to check roundtripped properties for Atom (using RDMol
-// backend)
-void check_roundtripped_properties(const Atom &original,
-                                   const Atom &roundtrip) {
-  auto includePrivate = false;
-  auto originalPropNames = original.getPropList(includePrivate, false);
-  auto roundtripPropNames = roundtrip.getPropList(includePrivate, false);
-
-  // We allow the roundtrip to add extra info, but the original
-  // properties must be present
-  REQUIRE(roundtripPropNames.size() >= originalPropNames.size());
-
-  std::sort(originalPropNames.begin(), originalPropNames.end());
-  std::sort(roundtripPropNames.begin(), roundtripPropNames.end());
-
-  REQUIRE(std::includes(roundtripPropNames.begin(), roundtripPropNames.end(),
-                        originalPropNames.begin(), originalPropNames.end()));
-
-  // Iterate through original properties using RDMol API
-  const auto &mol = original.getRDMol();
-  uint32_t idx = original.getIdx();
-  for (auto it = mol.beginProps(false, RDProperties::Scope::ATOM, idx);
-       it != mol.endProps(); ++it) {
-    const auto &prop = *it;
-    std::string propName = prop.name().getString();
-
-    UNSCOPED_INFO("Checking property = " << propName);
-
-    auto tag = prop.getRDValueTag(idx);
-    switch (tag) {
-      case RDTypeTag::BoolTag: {
-        bool origVal = original.getProp<bool>(propName);
-        CHECK(origVal == roundtrip.getProp<bool>(propName));
-        break;
-      }
-      case RDTypeTag::IntTag:
-      case RDTypeTag::UnsignedIntTag: {
-        int origVal = original.getProp<int>(propName);
-        CHECK(origVal == roundtrip.getProp<int>(propName));
-        break;
-      }
-      case RDTypeTag::DoubleTag:
-      case RDTypeTag::FloatTag: {
-        double origVal = original.getProp<double>(propName);
-        CHECK(origVal == roundtrip.getProp<double>(propName));
-        break;
-      }
-      case RDTypeTag::StringTag: {
-        std::string origVal = original.getProp<std::string>(propName);
-        CHECK(origVal == roundtrip.getProp<std::string>(propName));
-        break;
-      }
-      default:
-        // Skip unsupported types
-        break;
-    }
-  }
-}
-
-void check_roundtripped_properties(RDProps &original, RDProps &roundtrip) {
+template <class OriginalT, class RoundtripT>
+void check_roundtripped_properties(OriginalT &original, RoundtripT &roundtrip) {
   // We don't care about the computed or private props
   original.clearComputedProps();
   auto includePrivate = false;
@@ -6321,35 +6207,54 @@ void check_roundtripped_properties(RDProps &original, RDProps &roundtrip) {
   REQUIRE(std::includes(roundtripPropNames.begin(), roundtripPropNames.end(),
                         originalPropNames.begin(), originalPropNames.end()));
 
-  for (const auto &o : original.getDict()) {
-    if (o.key == detail::computedPropName) {
+  // Iterate by name and try each scalar type the test fixture installs.
+  // Mirrors the per-type fallback used in Wrap/props.hpp for the RDMol
+  // backend, which no longer exposes a single typed dict.
+  for (const auto &name : originalPropNames) {
+    if (name == detail::computedPropName) {
       continue;
     }
+    UNSCOPED_INFO("Checking property = " << name);
 
-    UNSCOPED_INFO("Checking property = " << o.key);
-
-    switch (o.val.getTag()) {
-      case RDTypeTag::BoolTag:
-        CHECK(rdvalue_cast<bool>(o.val) == roundtrip.getProp<bool>(o.key));
-        break;
-
-      case RDTypeTag::IntTag:
-      case RDTypeTag::UnsignedIntTag:
-        CHECK(rdvalue_cast<int>(o.val) == roundtrip.getProp<int>(o.key));
-        break;
-
-      case RDTypeTag::DoubleTag:
-      case RDTypeTag::FloatTag:
-        CHECK(rdvalue_cast<double>(o.val) == roundtrip.getProp<double>(o.key));
-        break;
-
-      case RDTypeTag::StringTag:
-        CHECK(rdvalue_cast<std::string>(o.val) ==
-              roundtrip.getProp<std::string>(o.key));
-        break;
-
-      default:
-        throw std::runtime_error("Unexpected property type");
+    bool checked = false;
+    bool bv;
+    if (!checked) {
+      try {
+        if (original.getPropIfPresent(name, bv)) {
+          CHECK(bv == roundtrip.template getProp<bool>(name));
+          checked = true;
+        }
+      } catch (...) {}
+    }
+    int iv;
+    if (!checked) {
+      try {
+        if (original.getPropIfPresent(name, iv)) {
+          CHECK(iv == roundtrip.template getProp<int>(name));
+          checked = true;
+        }
+      } catch (...) {}
+    }
+    double dv;
+    if (!checked) {
+      try {
+        if (original.getPropIfPresent(name, dv)) {
+          CHECK(dv == roundtrip.template getProp<double>(name));
+          checked = true;
+        }
+      } catch (...) {}
+    }
+    std::string sv;
+    if (!checked) {
+      try {
+        if (original.getPropIfPresent(name, sv)) {
+          CHECK(sv == roundtrip.template getProp<std::string>(name));
+          checked = true;
+        }
+      } catch (...) {}
+    }
+    if (!checked) {
+      throw std::runtime_error("Unexpected property type");
     }
   }
 }
@@ -8176,4 +8081,48 @@ M  END
     }
     CHECK(foundPyrroleN);
   }
+}
+
+TEST_CASE("duplicates in stereo groups") {
+  auto ctab = R"CTAB(
+  Mrv1642508181718102D          
+
+  0  0  0     0  0            999 V3000
+M  V30 BEGIN CTAB
+M  V30 COUNTS 8 7 0 0 0
+M  V30 BEGIN ATOM
+M  V30 1 C -5.2222 4.7778 0 0 CFG=2
+M  V30 2 Br -6.9685 5.5478 0 0
+M  V30 3 C -5.0557 3.2468 0 0
+M  V30 4 C -3.9796 5.6874 0 0 CFG=2
+M  V30 5 C -2.5705 5.0661 0 0 CFG=1
+M  V30 6 F -1.3279 5.9758 0 0
+M  V30 7 C -4.1461 7.2184 0 0
+M  V30 8 C -2.404 3.5352 0 0
+M  V30 END ATOM
+M  V30 BEGIN BOND
+M  V30 1 1 1 2
+M  V30 2 1 1 4
+M  V30 3 1 4 5
+M  V30 4 1 5 6
+M  V30 5 1 4 7 CFG=1
+M  V30 6 1 5 8 CFG=1
+M  V30 7 1 1 3 CFG=1
+M  V30 END BOND
+M  V30 BEGIN COLLECTION
+M  V30 MDLV30/STEREL1 ATOMS=(2 4 4)
+M  V30 END COLLECTION
+M  V30 END CTAB
+M  END
+)CTAB";
+  // CHECK_THROWS_AS(v2::FileParsers::MolFromMolBlock(ctab),
+  // FileParseException);
+  v2::FileParsers::MolFileParserParams params;
+  params.strictParsing = false;
+  auto m = v2::FileParsers::MolFromMolBlock(ctab, params);
+  REQUIRE(m);
+  const auto &stgs = m->getStereoGroups();
+  REQUIRE(stgs.size() == 1);
+  CHECK(stgs.front().getGroupType() == StereoGroupType::STEREO_OR);
+  CHECK(stgs.front().getAtoms().size() == 1);
 }

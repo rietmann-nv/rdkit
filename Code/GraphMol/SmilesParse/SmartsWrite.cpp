@@ -677,7 +677,7 @@ std::string FragmentSmartsConstruct(
 
   mol.getRingInfo()->reset();
   mol.getRingInfo()->initialize(FIND_RING_TYPE_SYMM_SSSR);
-  for (auto &atom : mol.atoms()) {
+  for (auto atom : mol.atoms()) {
     atom->updatePropertyCache(false);
   }
 

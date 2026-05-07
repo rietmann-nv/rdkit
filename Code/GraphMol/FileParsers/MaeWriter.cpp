@@ -487,7 +487,7 @@ void mapBonds(const ROMol &mol, const STR_VECT &propNames,
 
   std::shared_ptr<mae::IndexedProperty<mae::BoolProperty>> dativeBondMark =
       nullptr;
-  for (auto &bond : mol.bonds()) {
+  for (auto bond : mol.bonds()) {
     if (bond->getBondType() == Bond::BondType::DATIVE) {
       dativeBondMark = getIndexedProperty<mae::BoolProperty>(
           *bondBlock, MAE_BOND_DATIVE_MARK, numBonds);

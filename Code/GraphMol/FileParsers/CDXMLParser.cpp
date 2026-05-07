@@ -129,7 +129,7 @@ void scaleBonds(const ROMol &mol, Conformer &conf, double targetBondLength,
   if (bondLength < 0) {
     // If we don't have a bond length for any reason, just scale the avgerage
     // bond length
-    for (auto &bond : mol.bonds()) {
+    for (auto bond : mol.bonds()) {
       avg_bond_length += (conf.getAtomPos(bond->getBeginAtomIdx()) -
                           conf.getAtomPos(bond->getEndAtomIdx()))
                              .length();
@@ -600,7 +600,7 @@ void visit_children(
       conf->set3D(false);
 
       bool hasConf = false;
-      for (auto &atm : res->atoms()) {
+      for (auto atm : res->atoms()) {
         RDGeom::Point3D p{0.0, 0.0, 0.0};
 
         if (atm->hasProp(CDX_ATOM_POS)) {
@@ -760,7 +760,7 @@ std::vector<std::unique_ptr<RWMol>> MolsFromCDXMLDataStream(
       for (auto &mol : mols) {
         auto idx = mol->getProp<unsigned int>(CDXML_FRAG_ID);
         fragments[idx] = mol_idx++;
-        for (auto &atom : mol->atoms()) {
+        for (auto atom : mol->atoms()) {
           unsigned int idx = atom->getProp<unsigned int>(CDX_ATOM_ID);
           atoms[idx] = atom;
         }

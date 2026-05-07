@@ -50,7 +50,7 @@ void scaleBonds(const ROMol &mol, Conformer &conf, double targetBondLength,
   if (bondLength < 0) {
     // If we don't have a bond length for any reason, just scale the average
     // bond length
-    for (auto &bond : mol.bonds()) {
+    for (auto bond : mol.bonds()) {
       avg_bond_length += (conf.getAtomPos(bond->getBeginAtomIdx()) -
                           conf.getAtomPos(bond->getEndAtomIdx()))
                              .length();
@@ -175,7 +175,7 @@ bool replaceFragments(RWMol &mol) {
   // is here
   std::map<int, FragmentReplacement> replacements;
 
-  for (auto &atom : mol.atoms()) {
+  for (auto atom : mol.atoms()) {
     auto label = get_fuse_label(atom);
     if (label) {
       if (atom->hasProp(CDX_BOND_ORDERING)) {

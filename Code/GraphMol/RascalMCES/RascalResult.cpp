@@ -510,14 +510,14 @@ RDKit::ROMol *RascalResult::makeMolFrags(int molNum) const {
     }
   }
   molFrags->beginBatchEdit();
-  for (auto &a : molFrags->atoms()) {
+  for (auto a : molFrags->atoms()) {
     if (!ainClique[a->getIdx()]) {
       molFrags->removeAtom(a);
     } else {
       a->setProp<int>("ORIG_INDEX", a->getIdx());
     }
   }
-  for (auto &b : molFrags->bonds()) {
+  for (auto b : molFrags->bonds()) {
     if (!binClique[b->getIdx()]) {
       molFrags->removeBond(b->getBeginAtomIdx(), b->getEndAtomIdx());
     } else {
@@ -691,7 +691,7 @@ const std::shared_ptr<ROMol> RascalResult::getMcesMol() const {
   std::shared_ptr<RWMol> tmpMol(new RWMol(*d_mol1));
   MolOps::KekulizeIfPossible(*tmpMol);
   tmpMol->beginBatchEdit();
-  for (auto &bond : tmpMol->bonds()) {
+  for (auto bond : tmpMol->bonds()) {
     if (!mol1Bonds[bond->getIdx()]) {
       auto bo = bond->getBondType();
       if (bond->getBeginAtom()->getNoImplicit() ||

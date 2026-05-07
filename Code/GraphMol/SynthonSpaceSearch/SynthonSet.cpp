@@ -279,11 +279,11 @@ void SynthonSet::makeSynthonSearchMols() {
     for (size_t j = 0; j < d_synthons[i].size(); ++j) {
       synthonMolCopies[i].emplace_back(
           new RWMol(*d_synthons[i][j].second->getOrigMol().get()));
-      for (auto &atom : synthonMolCopies[i][j]->atoms()) {
+      for (auto atom : synthonMolCopies[i][j]->atoms()) {
         atom->setProp<int>("molNum", i);
         atom->setProp<int>("idx", atom->getIdx());
       }
-      for (auto &bond : synthonMolCopies[i][j]->bonds()) {
+      for (auto bond : synthonMolCopies[i][j]->bonds()) {
         bond->setProp<int>("molNum", i);
         bond->setProp<int>("idx", bond->getIdx());
       }

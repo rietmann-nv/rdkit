@@ -1075,10 +1075,10 @@ void _testSetProps(PropsT &props, const std::string &prefix) {
 
 void testSetProps(ROMol &mol) {
   _testSetProps(mol, "mol_");
-  for (auto &atom : mol.atoms()) {
+  for (auto atom : mol.atoms()) {
     _testSetProps(*atom, std::string("atom_") + std::to_string(atom->getIdx()));
   }
-  for (auto &bond : mol.bonds()) {
+  for (auto bond : mol.bonds()) {
     _testSetProps(*bond, std::string("bond_") + std::to_string(bond->getIdx()));
   }
   for (unsigned conf_idx = 0; conf_idx < mol.getNumConformers(); ++conf_idx) {

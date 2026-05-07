@@ -1493,7 +1493,7 @@ void testRanges() {
 
   // try refs
   i = 0;
-  for (auto &atom : m->atoms()) {
+  for (auto atom : m->atoms()) {
     TEST_ASSERT(atom->getIdx() == i);
     i++;
   }

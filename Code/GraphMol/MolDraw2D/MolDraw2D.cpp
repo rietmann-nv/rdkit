@@ -1205,7 +1205,7 @@ void MolDraw2D::findReactionHighlights(
     }
     for (size_t midx = 0; midx < rxn.getReactants().size(); ++midx) {
       auto fragMol = rxn.getReactants()[midx].get();
-      for (auto &atom : fragMol->atoms()) {
+      for (auto atom : fragMol->atoms()) {
         int atomRole = -1;
         if (atom->getPropIfPresent("molRxnRole", atomRole) && atomRole == 1 &&
             atom->getAtomMapNum()) {
