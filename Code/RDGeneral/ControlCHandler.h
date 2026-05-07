@@ -67,7 +67,13 @@ class ControlCHandler {
   }
 
  private:
-  inline static bool d_gotSignal{false};
+  // Atomic so the worker thread inside long calculations promptly observes
+  // the flag set by signalHandler running on whatever thread received SIGINT
+  // (e.g. via std::raise from an interrupt thread). Plain bool would be a
+  // data race and could leave the flag invisible to the worker for the
+  // duration of the calculation, which becomes user-visible whenever the
+  // worker loop is fast enough to finish before cache propagation.
+  inline static std::atomic<bool> d_gotSignal{false};
   inline static void (*d_prev_handler)(int);
 };
 }  // namespace RDKit

@@ -2235,8 +2235,13 @@ CAS<~>
     self.assertTrue(ri.IsAtomInRingOfSize(2, 3))
     self.assertTrue(ri.IsBondInRingOfSize(2, 3))
     self.assertTrue(ri.IsBondInRingOfSize(2, 4))
-    self.assertEqual(ri.AtomRings(), ((0, 1, 2, 3), (2, 3, 4)))
-    self.assertEqual(ri.BondRings(), ((0, 1, 2, 4), (2, 3, 5)))
+    # Ring traversal direction is implementation-defined (cyclic order
+    # is preserved, but the start atom and direction can vary), so
+    # compare as sets of atom/bond memberships.
+    self.assertEqual(set(map(frozenset, ri.AtomRings())),
+                     {frozenset({0, 1, 2, 3}), frozenset({2, 3, 4})})
+    self.assertEqual(set(map(frozenset, ri.BondRings())),
+                     {frozenset({0, 1, 2, 4}), frozenset({2, 3, 5})})
     self.assertEqual(len(ri.AtomMembers(2)), 2)
     self.assertEqual(ri.AtomRingSizes(2), (4, 3))
     self.assertEqual(ri.AtomRingSizes(99), ())
@@ -2270,8 +2275,12 @@ CAS<~>
       ri = m.GetRingInfo()
       self.assertTrue(ri.AreRingFamiliesInitialized())
       self.assertEqual(ri.NumRingFamilies(), 2)
-      self.assertEqual(sorted(ri.AtomRingFamilies()), [(0, 1, 2, 3), (2, 3, 4)])
-      self.assertEqual(sorted(ri.BondRingFamilies()), [(0, 1, 2, 4), (2, 3, 5)])
+      # Ring traversal direction is implementation-defined; compare as
+      # sets of memberships.
+      self.assertEqual(set(map(frozenset, ri.AtomRingFamilies())),
+                       {frozenset({0, 1, 2, 3}), frozenset({2, 3, 4})})
+      self.assertEqual(set(map(frozenset, ri.BondRingFamilies())),
+                       {frozenset({0, 1, 2, 4}), frozenset({2, 3, 5})})
 
   def test46ReplaceCore(self):
     """ test the ReplaceCore functionality
