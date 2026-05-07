@@ -757,6 +757,8 @@ RDKIT_GRAPHMOL_EXPORT void cleanUp(RWMol &mol);
 RDKIT_GRAPHMOL_EXPORT void cleanUpOrganometallics(RWMol &mol);
 
 //! Called by the sanitizer to assign radical counts to atoms
+RDKIT_GRAPHMOL_EXPORT void assignRadicals(RDMol &mol);
+//! \overload
 RDKIT_GRAPHMOL_EXPORT void assignRadicals(RWMol &mol);
 
 //! adjust the number of implicit and explicit Hs for special cases
@@ -1217,6 +1219,9 @@ RDKIT_GRAPHMOL_EXPORT void setDoubleBondNeighborDirections(
     ROMol &mol, const Conformer *conf = nullptr);
 //! removes directions from single bonds. The property _UnknownStereo will be
 //! set on wiggly bonds
+RDKIT_GRAPHMOL_EXPORT void clearSingleBondDirFlags(RDMol &mol,
+                                                   bool onlyWedgeFlags = false);
+//! \overload
 RDKIT_GRAPHMOL_EXPORT void clearSingleBondDirFlags(ROMol &mol,
                                                    bool onlyWedgeFlags = false);
 

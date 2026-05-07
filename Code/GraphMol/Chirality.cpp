@@ -3706,20 +3706,28 @@ void detectBondStereochemistry(ROMol &mol, int confId) {
   setDoubleBondNeighborDirections(mol, &conf);
 }
 
-void clearSingleBondDirFlags(ROMol &mol, bool onlyWedgeFlags) {
-  for (auto bond : mol.bonds()) {
-    if (bond->getBondType() == Bond::SINGLE) {
-      if (bond->getBondDir() == Bond::UNKNOWN) {
-        bond->setProp(common_properties::_UnknownStereo, 1);
+void clearSingleBondDirFlags(RDMol &mol, bool onlyWedgeFlags) {
+  auto &bondVec = mol.getBondDataVector();
+  for (uint32_t bondIdx = 0, numBonds = uint32_t(bondVec.size());
+       bondIdx < numBonds; ++bondIdx) {
+    BondData &bond = bondVec[bondIdx];
+    if (bond.getBondType() == BondEnums::BondType::SINGLE) {
+      if (bond.getBondDir() == BondEnums::BondDir::UNKNOWN) {
+        mol.setSingleBondProp(common_properties::_UnknownStereoToken, bondIdx,
+                              1);
       }
 
       if (!onlyWedgeFlags ||
-          (bond->getBondDir() != Bond::BondDir::ENDDOWNRIGHT &&
-           bond->getBondDir() != Bond::BondDir::ENDUPRIGHT)) {
-        bond->setBondDir(Bond::NONE);
+          (bond.getBondDir() != BondEnums::BondDir::ENDDOWNRIGHT &&
+           bond.getBondDir() != BondEnums::BondDir::ENDUPRIGHT)) {
+        bond.setBondDir(BondEnums::BondDir::NONE);
       }
     }
   }
+}
+
+void clearSingleBondDirFlags(ROMol &mol, bool onlyWedgeFlags) {
+  clearSingleBondDirFlags(mol.asRDMol(), onlyWedgeFlags);
 }
 
 void clearDirFlags(ROMol &mol, bool onlyWedgeTypeBondDirs) {

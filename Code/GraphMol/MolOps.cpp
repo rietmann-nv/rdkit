@@ -425,30 +425,31 @@ void adjustHs(RDMol &mol) {
 
 void adjustHs(RWMol &mol) { adjustHs(mol.asRDMol()); }
 
-void assignRadicals(RWMol &mol) {
-  for (auto atom : mol.atoms()) {
+void assignRadicals(RDMol &mol) {
+  auto &atomVec = mol.getAtomDataVector();
+  for (uint32_t atomIdx = 0, numAtoms = uint32_t(atomVec.size());
+       atomIdx < numAtoms; ++atomIdx) {
+    AtomData &atom = atomVec[atomIdx];
     // we only automatically assign radicals to atoms that
     // don't have implicit Hs:
-    if (!atom->getNoImplicit() || !atom->getAtomicNum()) {
+    if (!atom.getNoImplicit() || !atom.getAtomicNum()) {
       continue;
     }
     const auto &valens =
-        PeriodicTable::getTable()->getValenceList(atom->getAtomicNum());
-    int chg = atom->getFormalCharge();
+        PeriodicTable::getTable()->getValenceList(atom.getAtomicNum());
+    int chg = atom.getFormalCharge();
     int nOuter =
-        PeriodicTable::getTable()->getNouterElecs(atom->getAtomicNum());
+        PeriodicTable::getTable()->getNouterElecs(atom.getAtomicNum());
     if (valens.size() != 1 || valens[0] != -1) {
       double accum = 0.0;
-      RWMol::OEDGE_ITER beg, end;
-      boost::tie(beg, end) = mol.getAtomBonds(atom);
-      while (beg != end) {
-        accum += mol[*beg]->getValenceContrib(atom);
-        ++beg;
+      auto [beg, end] = mol.getAtomBonds(atomIdx);
+      for (; beg != end; ++beg) {
+        accum += mol.getBond(*beg).getValenceContrib(atomIdx);
       }
-      accum += atom->getNumExplicitHs();
+      accum += atom.getNumExplicitHs();
       int totalValence = static_cast<int>(accum + 0.1);
       int baseCount = 8;
-      if (atom->getAtomicNum() == 1 || atom->getAtomicNum() == 2) {
+      if (atom.getAtomicNum() == 1 || atom.getAtomicNum() == 2) {
         baseCount = 2;
       }
 
@@ -457,10 +458,10 @@ void assignRadicals(RWMol &mol) {
       if (numRadicals < 0) {
         numRadicals = 0;
         // can the atom be "hypervalent"?  (was github #447)
-        const INT_VECT &valens =
-            PeriodicTable::getTable()->getValenceList(atom->getAtomicNum());
-        if (valens.size() > 1) {
-          for (auto val : valens) {
+        const INT_VECT &valensInner =
+            PeriodicTable::getTable()->getValenceList(atom.getAtomicNum());
+        if (valensInner.size() > 1) {
+          for (auto val : valensInner) {
             if (val - totalValence + chg >= 0) {
               numRadicals = val - totalValence + chg;
               break;
@@ -473,12 +474,12 @@ void assignRadicals(RWMol &mol) {
       if (numRadicals2 >= 0) {
         numRadicals = std::min(numRadicals, numRadicals2);
       }
-      atom->setNumRadicalElectrons(numRadicals);
+      atom.setNumRadicalElectrons(numRadicals);
     } else {
       // #7122: if there's a bond to the metal center, then don't assign
       // radicals:
-      if (atom->getDegree() > 0) {
-        atom->setNumRadicalElectrons(0);
+      if (mol.getAtomDegree(atomIdx) > 0) {
+        atom.setNumRadicalElectrons(0);
       } else {
         auto nValence = nOuter - chg;
         //  if this is an atom where we have no preferred valence info at all,
@@ -488,14 +489,16 @@ void assignRadicals(RWMol &mol) {
           // this was github #5462
           nValence = 0;
           BOOST_LOG(rdWarningLog)
-              << "Unusual charge on atom " << atom->getIdx()
+              << "Unusual charge on atom " << atomIdx
               << " number of radical electrons set to zero" << std::endl;
         }
-        atom->setNumRadicalElectrons(nValence % 2);
+        atom.setNumRadicalElectrons(nValence % 2);
       }
     }
   }
 }
+
+void assignRadicals(RWMol &mol) { assignRadicals(mol.asRDMol()); }
 
 MolOps::Hybridizations::Hybridizations(const ROMol &mol) {
   d_hybridizations.clear();
