@@ -271,7 +271,7 @@ class BondData {
   }
 
   double getValenceContrib(const atomindex_t atomIndex) const {
-    return getTwiceValenceContrib(atomIndex) / 2;
+    return 0.5 * getTwiceValenceContrib(atomIndex);
   }
 
 

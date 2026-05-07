@@ -2189,6 +2189,26 @@ TEST_CASE("QueryBond valence contribs") {
   }
 }
 
+TEST_CASE("BondData::getValenceContrib matches Bond::getValenceContrib") {
+  // Regression test: the native BondData::getValenceContrib(atomindex_t)
+  // overload must agree with the compat-layer Bond::getValenceContrib(Atom*).
+  // An aromatic bond contributes 1.5 to valence (getTwiceValenceContrib
+  // returns 3, and the contract is half of that).
+  auto m = "c1ccccc1"_smiles;
+  REQUIRE(m);
+  auto &rdmol = m->asRDMol();
+  for (uint32_t bondIdx = 0; bondIdx < rdmol.getNumBonds(); ++bondIdx) {
+    const BondData &bondData = rdmol.getBond(bondIdx);
+    REQUIRE(bondData.getBondType() == BondEnums::BondType::AROMATIC);
+    CHECK(bondData.getValenceContrib(bondData.getBeginAtomIdx()) == 1.5);
+    CHECK(bondData.getValenceContrib(bondData.getEndAtomIdx()) == 1.5);
+    // Compat path agrees with native:
+    const Bond *bond = m->getBondWithIdx(bondIdx);
+    CHECK(bond->getValenceContrib(bond->getBeginAtom()) ==
+          bondData.getValenceContrib(bondData.getBeginAtomIdx()));
+  }
+}
+
 TEST_CASE(
     "github #4311: unreasonable calculation of implicit valence for atoms with "
     "query bonds",
