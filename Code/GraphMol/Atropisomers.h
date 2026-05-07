@@ -38,6 +38,8 @@ RDKIT_GRAPHMOL_EXPORT void getAllAtomIdsForStereoGroup(
     const std::map<int, std::unique_ptr<RDKit::Chirality::WedgeInfoBase>>
         &wedgeBonds);
 
+RDKIT_GRAPHMOL_EXPORT void cleanupAtropisomerStereoGroups(RDMol &mol);
+//! \overload
 RDKIT_GRAPHMOL_EXPORT void cleanupAtropisomerStereoGroups(ROMol &mol);
 }  // namespace Atropisomers
 }  // namespace RDKit

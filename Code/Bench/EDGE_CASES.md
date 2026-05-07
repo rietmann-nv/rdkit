@@ -131,6 +131,18 @@ cleanupAtropisomers
   begin+end atoms. Canonical SMILES does not have such markers; they come
   from MOL files / drawings.
 
+Atropisomers::cleanupAtropisomerStereoGroups (commit pending)
+  Trigger: stereo groups whose member atoms have atropisomeric bonds
+  (STEREOATROPCCW/STEREOATROPCW). Restructures the group into separate
+  atom-set and bond-set, depending on which atoms actually have
+  atrop bonds. Canonical SMILES samples have stereo groups but no
+  atrop markers, so this function exits early with the original groups
+  preserved unchanged. Coverage from existing tests around atropisomer
+  parsing/output.
+
+  Stress: MOL files with manually-applied atrop bonds inside stereo
+  groups. Examples in MolStandardize test_data.
+
 Kekulize
   Triggers on every aromatic input. Canonical set has many, no stress
   needed.

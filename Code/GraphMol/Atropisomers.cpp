@@ -484,39 +484,62 @@ void DetectAtropisomerChiralityOneBond(Bond *bond, ROMol &mol,
   }
 }
 
-void cleanupAtropisomerStereoGroups(ROMol &mol) {
-  std::vector<StereoGroup> newsgs;
-  for (auto sg : mol.getStereoGroups()) {
-    std::vector<Atom *> okatoms;
-    std::vector<Bond *> okbonds;
+void cleanupAtropisomerStereoGroups(RDMol &mol) {
+  const StereoGroups *sgs = mol.getStereoGroups();
+  if (sgs == nullptr || sgs->getNumGroups() == 0) {
+    return;
+  }
+  auto newsgs = std::make_unique<StereoGroups>();
+  for (uint32_t groupIdx = 0, numGroups = sgs->getNumGroups();
+       groupIdx < numGroups; ++groupIdx) {
+    std::vector<uint32_t> okatoms;
+    std::vector<uint32_t> okbonds;
 
-    for (auto atom : sg.getAtoms()) {
+    auto [atomBegin, atomEnd] = sgs->getAtoms(groupIdx);
+    for (auto it = atomBegin; it != atomEnd; ++it) {
+      const uint32_t atomIdx = *it;
       bool foundAtrop = false;
-      for (auto bndI : boost::make_iterator_range(mol.getAtomBonds(atom))) {
-        auto bond = (mol)[bndI];
-        if (bond->getStereo() == Bond::BondStereo::STEREOATROPCCW ||
-            bond->getStereo() == Bond::BondStereo::STEREOATROPCW) {
+      auto [bondBegin, bondEnd] = mol.getAtomBonds(atomIdx);
+      for (auto bondIt = bondBegin; bondIt != bondEnd; ++bondIt) {
+        const uint32_t bondIdx = *bondIt;
+        const BondData &bond = mol.getBond(bondIdx);
+        if (bond.getStereo() == BondEnums::BondStereo::STEREOATROPCCW ||
+            bond.getStereo() == BondEnums::BondStereo::STEREOATROPCW) {
           foundAtrop = true;
-          if (std::find(okbonds.begin(), okbonds.end(), bond) ==
+          if (std::find(okbonds.begin(), okbonds.end(), bondIdx) ==
               okbonds.end()) {
-            okbonds.push_back(bond);
+            okbonds.push_back(bondIdx);
           }
         }
       }
 
       if (!foundAtrop) {
-        okatoms.push_back(atom);
+        okatoms.push_back(atomIdx);
       }
     }
 
     if (okbonds.empty()) {
-      newsgs.push_back(sg);
+      // Keep the original group unchanged (preserves readId and writeId,
+      // matching the legacy ROMol behavior of newsgs.push_back(sg)).
+      auto [origAtomBegin, origAtomEnd] = sgs->getAtoms(groupIdx);
+      auto [origBondBegin, origBondEnd] = sgs->getBonds(groupIdx);
+      std::vector<uint32_t> origAtoms(origAtomBegin, origAtomEnd);
+      std::vector<uint32_t> origBonds(origBondBegin, origBondEnd);
+      newsgs->addGroup(sgs->getGroupType(groupIdx), origAtoms, origBonds,
+                       sgs->getReadID(groupIdx));
+      newsgs->setWriteID(newsgs->getNumGroups() - 1,
+                         sgs->getWriteID(groupIdx));
     } else {
-      newsgs.emplace_back(sg.getGroupType(), std::move(okatoms),
-                          std::move(okbonds));
+      // Rewrote the group; the legacy ROMol body used the 3-arg StereoGroup
+      // ctor which defaults readId=0 and writeId=0, so do the same here.
+      newsgs->addGroup(sgs->getGroupType(groupIdx), okatoms, okbonds);
     }
   }
   mol.setStereoGroups(std::move(newsgs));
+}
+
+void cleanupAtropisomerStereoGroups(ROMol &mol) {
+  cleanupAtropisomerStereoGroups(mol.asRDMol());
 }
 
 void detectAtropisomerChirality(ROMol &mol, const Conformer *conf) {
