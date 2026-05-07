@@ -1969,6 +1969,21 @@ RDMol::~RDMol() {
   clear();
 }
 
+void RDMol::clearCompatibilityData() {
+  CompatibilityData *data =
+      compatibilityData.load(std::memory_order_relaxed);
+  if (data == nullptr) {
+    return;
+  }
+  if (data->compatMol != nullptr && data->compatMol->d_ownedBySelf) {
+    throw ValueErrorException(
+        "RDMol::clearCompatibilityData called while an external ROMol/RWMol "
+        "owns this RDMol");
+  }
+  delete data;
+  compatibilityData.store(nullptr, std::memory_order_relaxed);
+}
+
 void RDMol::clear() {
   atomData.resize(0);
   atomBondStarts.resize(0);

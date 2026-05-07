@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <GraphMol/ROMol.h>
+#include <GraphMol/RDMol.h>
 
 namespace bench_common {
 
@@ -29,6 +30,13 @@ constexpr const char *SAMPLES[] = {
 };
 
 std::vector<RDKit::ROMol> load_samples();
+
+//! Build the sample set directly into RDMol via the native
+//! SmilesToMol(const char*, params, RDMol&, SmilesParseTemp&) entry point.
+//! After parsing, the compatibility data populated by sanitization is
+//! discarded so that subsequent operations on the returned molecules run
+//! without compat overhead.
+std::vector<RDKit::RDMol> load_rdmol_samples();
 
 constexpr uint64_t nth_random(uint64_t n) noexcept {
   // https://xoshiro.di.unimi.it/splitmix64.c

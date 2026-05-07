@@ -1862,6 +1862,18 @@ class RDKIT_GRAPHMOL_EXPORT RDMol {
   RWMol &asRWMol();
   const RWMol &asRWMol() const;
 
+  //! Releases the internal compatibility data (compat ROMol/RWMol shell and
+  //! per-atom/per-bond Atom/Bond wrappers) so the next operation that needs
+  //! them allocates afresh. Useful for callers that touched the compat path
+  //! during setup (e.g. sanitization in SmilesToMol(RDMol&, ...)) but want
+  //! subsequent native operations to run without the compat overhead.
+  //!
+  //! \pre No external ROMol or RWMol may own this RDMol; throws
+  //! ValueErrorException if it does. Self-owned compat shells (created by
+  //! asROMol()/asRWMol()/sanitization on a default-constructed RDMol) are
+  //! always safe to clear.
+  void clearCompatibilityData();
+
   Ranges::IndexRange<false, false> atoms();
   Ranges::IndexRange<false, true> atoms() const;
   Ranges::IndexRange<true, false> bonds();

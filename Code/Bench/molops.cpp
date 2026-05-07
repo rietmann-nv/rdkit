@@ -3,8 +3,9 @@
 
 #include "bench_common.hpp"
 
-#include <GraphMol/SmilesParse/SmilesParse.h>
 #include <GraphMol/MolOps.h>
+#include <GraphMol/RDMol.h>
+#include <GraphMol/SmilesParse/SmilesParse.h>
 
 using namespace RDKit;
 
@@ -27,6 +28,18 @@ TEST_CASE("MolOps::FindSSR", "[molops]") {
     auto total = 0;
     for (auto &mol : samples) {
       total += MolOps::findSSSR(mol);
+    }
+    return total;
+  };
+}
+
+TEST_CASE("MolOps::FindSSR RDMol", "[molops][rdmol]") {
+  auto samples = bench_common::load_rdmol_samples();
+  BENCHMARK("MolOps::FindSSR RDMol") {
+    auto total = 0;
+    RingInfoCache ringInfo;
+    for (auto &mol : samples) {
+      total += MolOps::findSSSR(mol, ringInfo);
     }
     return total;
   };
