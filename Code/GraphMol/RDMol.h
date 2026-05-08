@@ -1885,6 +1885,15 @@ class RDKIT_GRAPHMOL_EXPORT RDMol {
   //! always safe to clear.
   void clearCompatibilityData();
 
+  //! True if a compatibility ROMol / RWMol shell has been allocated for this
+  //! RDMol. Lets caller code skip compat-aware fallbacks (e.g. compat ring
+  //! info sync, compat StereoGroup mirror) when no compat shell exists.
+  //! \warning the result can change in another thread; only use this in
+  //! places where a false negative is acceptable.
+  bool hasCompatData() const {
+    return compatibilityData.load(std::memory_order_relaxed) != nullptr;
+  }
+
   Ranges::IndexRange<false, false> atoms();
   Ranges::IndexRange<false, true> atoms() const;
   Ranges::IndexRange<true, false> bonds();

@@ -1454,8 +1454,7 @@ int mmff94AromaticityHelper(RWMol &mol, const VECT_INT_VECT &srings) {
   return narom;
 }
 
-  int mmff94AromaticityHelper(RWMol &rwmol, // TODO: remove once Kekulize is ported
-                            RDMol &mol, const RingInfoCache &ringInfo) {
+int mmff94AromaticityHelper(RDMol &mol, const RingInfoCache &ringInfo) {
   // set aromaticity as done in MMFF94 init
   if (!mol.hasProp(PropToken(common_properties::_MMFFSanitized))) {
     bool isAromaticSet = false;
@@ -1466,7 +1465,7 @@ int mmff94AromaticityHelper(RWMol &mol, const VECT_INT_VECT &srings) {
       }
     }
     if (isAromaticSet) {
-      MolOps::Kekulize(rwmol, true);
+      MolOps::Kekulize(mol, true);
     }
     mol.setMolProp(PropToken(common_properties::_MMFFSanitized), 1, true);
   }
@@ -2090,19 +2089,11 @@ void setMMFFAromaticity(RDMol &mol) {
 
 
 namespace {
-int setAromaticityImpl(RWMol &rwmol, AromaticityModel model,
+int setAromaticityImpl(RDMol &mol, AromaticityModel model,
                        std::function<int(RDMol &)> func) {
   // This function used to check if the input molecule came
   // with aromaticity information, assumed it is correct and
   // did not touch it. Now it ignores that information entirely.
-
-  // Trigger a compat ring info sync (RDMol → compat) if needed.
-  // This mirrors the reference implementation which called mol.getRingInfo()
-  // via ROMol, ensuring that cached RingInfo* pointers stay valid after
-  // removeBond + sanitizeMol.
-  rwmol.getRingInfo();
-
-  auto &mol = rwmol.asRDMol();
 
   if (!mol.getRingInfo().isInitialized()) {
     MolOps::symmetrizeSSSR(mol);
@@ -2121,8 +2112,7 @@ int setAromaticityImpl(RWMol &rwmol, AromaticityModel model,
       res = mdlAromaticityHelper(mol, ring_info);
       break;
     case AROMATICITY_MMFF94:
-      // once Kekulize is ported, we can remove the RWMol argument and just use the RDMol
-      res = mmff94AromaticityHelper(rwmol, mol, ring_info);
+      res = mmff94AromaticityHelper(mol, ring_info);
       break;
     case AROMATICITY_CUSTOM:
       PRECONDITION(
@@ -2137,18 +2127,22 @@ int setAromaticityImpl(RWMol &rwmol, AromaticityModel model,
 }
 }  // namespace
 
+int setAromaticity(RDMol &mol, AromaticityModel model, int (*func)(RDMol &)) {
+  return setAromaticityImpl(mol, model, func);
+}
+
 // Legacy overload: existing custom functions written against RWMol continue to work
 int setAromaticity(RWMol &rwmol, AromaticityModel model, int (*func)(RWMol &)) {
   std::function<int(RDMol &)> wrapper;
   if (func) {
     wrapper = [func, &rwmol](RDMol &) { return func(rwmol); };
   }
-  return setAromaticityImpl(rwmol, model, std::move(wrapper));
+  return setAromaticityImpl(rwmol.asRDMol(), model, std::move(wrapper));
 }
 
 // New overload: custom functions written against RDMol
 int setAromaticity(RWMol &rwmol, AromaticityModel model, int (*func)(RDMol &)) {
-  return setAromaticityImpl(rwmol, model, func);
+  return setAromaticityImpl(rwmol.asRDMol(), model, func);
 }
 
 };  // end of namespace MolOps

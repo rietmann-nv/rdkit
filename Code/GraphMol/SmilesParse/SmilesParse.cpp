@@ -68,7 +68,13 @@ bool SmilesToMol(const char *smiles,
                  RDMol &mol, SmilesParseTemp &temp) {
   bool success = SmilesParseInternal::parseSmiles(smiles, mol, temp);
   if (success && (params.sanitize || params.removeHs)) {
-    // Handle stereochemistry from CXSMILES wedged bonds
+    // Handle stereochemistry from CXSMILES wedged bonds.
+    // assignChiralTypesFromBondDirs / assignChiralTypesFrom3D /
+    // clearSingleBondDirFlags / detectBondStereochemistry are still
+    // ROMol-only (per EDGE_CASES.md "stereo helpers"); these conditional
+    // blocks only run for CXSMILES wedge / 3D-conformer SMILES, which the
+    // canonical bench set never hits. Bridge through asROMol() until those
+    // helpers are ported.
     if (mol.hasProp(PropToken(SmilesParseOps::detail::_needsDetectAtomStereo))) {
       mol.clearMolPropIfPresent(PropToken(SmilesParseOps::detail::_needsDetectAtomStereo));
       for(unsigned int i=0; i<mol.getNumConformers(); ++i) {
@@ -91,21 +97,22 @@ bool SmilesToMol(const char *smiles,
         MolOps::RemoveHsParameters ps;
         ps.updateExplicitCount = updateExplicitCount;
         ps.removeNonimplicit = !implicitOnly;
-        MolOps::removeHs(mol.asRWMol(), ps,
-                         params.sanitize);
+        MolOps::SanitizeTemp sanitizeTemp;
+        MolOps::removeHs(mol, ps, sanitizeTemp, params.sanitize);
       } else if (params.sanitize) {
-        // RDMol doesn't have sanitizeMol yet, convert to RWMol temporarily
-        MolOps::sanitizeMol(mol.asRWMol());
+        MolOps::sanitizeMol(mol);
       }
     } catch (...) {
       mol.clear();
       return false;
     }
 
-    // Handle wiggly bonds from CXSMILES
+    // Handle wiggly bonds from CXSMILES (still ROMol-shaped helpers; see
+    // comment above).
     if (mol.hasProp(PropToken(SmilesParseOps::detail::_needsDetectBondStereo))) {
-      mol.asROMol().clearProp(SmilesParseOps::detail::_needsDetectBondStereo);
-      MolOps::clearSingleBondDirFlags(mol.asROMol());
+      mol.clearMolPropIfPresent(
+          PropToken(SmilesParseOps::detail::_needsDetectBondStereo));
+      MolOps::clearSingleBondDirFlags(mol);
       MolOps::detectBondStereochemistry(mol.asROMol());
     }
 

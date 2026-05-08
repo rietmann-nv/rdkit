@@ -625,6 +625,12 @@ BETTER_ENUM(SanitizeFlags, unsigned int,
       the molecule and screw up the sanitizing that has been done here
 */
 RDKIT_GRAPHMOL_EXPORT void sanitizeMol(
+    RDMol &mol, unsigned int &operationThatFailed,
+    unsigned int sanitizeOps = SanitizeFlags::SANITIZE_ALL);
+//! \overload
+RDKIT_GRAPHMOL_EXPORT void sanitizeMol(RDMol &mol);
+//! \overload
+RDKIT_GRAPHMOL_EXPORT void sanitizeMol(
     RWMol &mol, unsigned int &operationThatFailed,
     unsigned int sanitizeOps = SanitizeFlags::SANITIZE_ALL);
 //! \overload
@@ -710,6 +716,10 @@ RDKIT_GRAPHMOL_EXPORT void setMMFFAromaticity(RDMol &mol);
       been called)
 
 */
+RDKIT_GRAPHMOL_EXPORT int setAromaticity(
+    RDMol &mol, AromaticityModel model = AROMATICITY_DEFAULT,
+    int (*func)(RDMol &) = nullptr);
+//! \overload
 RDKIT_GRAPHMOL_EXPORT int setAromaticity(
     RWMol &mol, AromaticityModel model = AROMATICITY_DEFAULT,
     int (*func)(RWMol &) = nullptr);

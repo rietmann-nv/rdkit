@@ -605,11 +605,16 @@ void cleanupAtropisomers(RDMol &mol, MolOps::Hybridizations &hybs) {
 void cleanupAtropisomers(RWMol &mol, MolOps::Hybridizations &hybs) {
   cleanupAtropisomers(mol.asRDMol(), hybs);
 }
+void sanitizeMol(RDMol &mol) {
+  unsigned int failedOp = 0;
+  sanitizeMol(mol, failedOp, SANITIZE_ALL);
+}
 void sanitizeMol(RWMol &mol) {
   unsigned int failedOp = 0;
   sanitizeMol(mol, failedOp, SANITIZE_ALL);
 }
-void sanitizeMol(RWMol &mol, unsigned int &operationThatFailed,
+
+void sanitizeMol(RDMol &mol, unsigned int &operationThatFailed,
                  unsigned int sanitizeOps) {
   // clear out any cached properties
   mol.clearComputedProps();
@@ -621,9 +626,15 @@ void sanitizeMol(RWMol &mol, unsigned int &operationThatFailed,
   }
 
   // fix things like non-metal to metal bonds that should be dative.
+  // cleanUpOrganometallics tail-calls Canon::rankMolAtoms which is the
+  // deferred Canon module port (EDGE_CASES.md), so it stays RWMol-only.
+  // Bridge here: the RDMol entry point doesn't go through this branch -
+  // sanitizeMol(RWMol&) overrides the dispatcher to call cleanUpOrganometallics
+  // on the original RWMol so a static_cast<RWMol*>(new ROMol()) caller (see
+  // MolOps::getTheFragsWithQuery) still works.
   operationThatFailed = SANITIZE_CLEANUP_ORGANOMETALLICS;
   if (sanitizeOps & operationThatFailed) {
-    cleanUpOrganometallics(mol);
+    cleanUpOrganometallics(mol.asRWMol());
   }
 
   // update computed properties on atoms and bonds:
@@ -636,8 +647,7 @@ void sanitizeMol(RWMol &mol, unsigned int &operationThatFailed,
 
   operationThatFailed = SANITIZE_SYMMRINGS;
   if (sanitizeOps & operationThatFailed) {
-    VECT_INT_VECT arings;
-    MolOps::symmetrizeSSSR(mol, arings);
+    MolOps::symmetrizeSSSR(mol);
   }
 
   // kekulizations
@@ -701,6 +711,46 @@ void sanitizeMol(RWMol &mol, unsigned int &operationThatFailed,
     mol.updatePropertyCache(true);
   }
   operationThatFailed = 0;
+
+  // If a caller had cached a compat RingInfo* before sanitize, it expects
+  // that pointer to be live and up-to-date afterward (covered by
+  // graphmolMolOpsTest "Testing isRingFused"). The native symmetrizeSSSR
+  // / Kekulize / setAromaticity calls above only update the native
+  // RingInfoCache; touching the compat ring info here re-syncs it from
+  // native. No-op when no compat data is allocated, so RDMol-only callers
+  // (e.g. load_rdmol_samples in the bench harness) pay nothing.
+  if (mol.hasCompatData()) {
+    mol.asROMol().getRingInfo();
+  }
+}
+
+void sanitizeMol(RWMol &mol, unsigned int &operationThatFailed,
+                 unsigned int sanitizeOps) {
+  // We dispatch most of the pipeline to the RDMol overload, but we have to
+  // intercept SANITIZE_CLEANUP_ORGANOMETALLICS to invoke
+  // cleanUpOrganometallics on the *user's* RWMol. The deferred Canon module
+  // port means cleanUpOrganometallics is RWMol-only; calling
+  // mol.asRWMol() inside sanitizeMol(RDMol&) breaks for callers that
+  // static_cast<RWMol*>(new ROMol()) (see getTheFragsWithQuery).
+  RDMol &rdmol = mol.asRDMol();
+  // Run cleanUpOrganometallics now (if requested) on the original RWMol,
+  // then strip the bit so the RDMol dispatcher skips it.
+  if (sanitizeOps & SANITIZE_CLEANUP_ORGANOMETALLICS) {
+    // Match the dispatcher: it would clearComputedProps and run cleanUp
+    // first, so sequence is preserved by doing those, then organometallics,
+    // then dispatching the remaining ops on RDMol.
+    rdmol.clearComputedProps();
+    if (sanitizeOps & SANITIZE_CLEANUP) {
+      cleanUp(rdmol);
+    }
+    operationThatFailed = SANITIZE_CLEANUP_ORGANOMETALLICS;
+    cleanUpOrganometallics(mol);
+    sanitizeMol(rdmol, operationThatFailed,
+                sanitizeOps & ~(SANITIZE_CLEANUP_ORGANOMETALLICS |
+                                 SANITIZE_CLEANUP));
+  } else {
+    sanitizeMol(rdmol, operationThatFailed, sanitizeOps);
+  }
 }
 
 std::vector<std::unique_ptr<MolSanitizeException>> detectChemistryProblems(

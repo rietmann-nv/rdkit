@@ -1161,10 +1161,7 @@ void removeHs(RDMol &mol, const RemoveHsParameters &ps,
   // If we removed non-implicit Hs, atom indices may have shifted in ways
   // that invalidate derived properties (ring membership, etc); re-sanitize.
   if (!atomsToRemove.empty() && ps.removeNonimplicit && sanitize) {
-    // sanitizeMol(RDMol&) is not yet ported; bridge through the compat
-    // shell. This is the last asRWMol() in removeHs and disappears when
-    // sanitizeMol lands.
-    sanitizeMol(mol.asRWMol());
+    sanitizeMol(mol);
   }
 
   // If we removed Hs and any chiral atom ended up with more than one

@@ -54,6 +54,23 @@ TEST_CASE("SmilesToMol RDMol no-sanitize", "[smiles][rdmol]") {
   };
 }
 
+TEST_CASE("SmilesToMol RDMol", "[smiles][rdmol]") {
+  // Default-params (sanitize=true, removeHs=true) end-to-end; this is the
+  // SMILES path the entire migration was aiming at.
+  SmilesParserParams params;
+  BENCHMARK("SmilesToMol RDMol") {
+    SmilesParseTemp temp;
+    auto total_atoms = 0;
+    for (auto smiles : bench_common::SAMPLES) {
+      RDMol mol;
+      const bool success = SmilesToMol(smiles, params, mol, temp);
+      REQUIRE(success);
+      total_atoms += mol.getNumAtoms();
+    }
+    return total_atoms;
+  };
+}
+
 TEST_CASE("MolToSmiles", "[smiles]") {
   auto samples = bench_common::load_samples();
   BENCHMARK("MolToSmiles") {
