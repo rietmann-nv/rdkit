@@ -28,9 +28,13 @@ std::vector<RDKit::RDMol> load_rdmol_samples() {
     auto &mol = ret.emplace_back();
     const bool success = RDKit::SmilesToMol(smiles, params, mol, temp);
     REQUIRE(success);
-    // Sanitization in the native RDMol parser path goes through asRWMol(),
-    // which materializes a CompatibilityData block. Discard it so the
-    // benchmarks that follow measure the flat-array path only.
+    // The default-params SmilesToMol(RDMol&) path is now native end to
+    // end (commits 297ea7237..d9e052c7e), but the
+    // SANITIZE_CLEANUP_ORGANOMETALLICS step still bridges through
+    // asRWMol() to call Canon::rankMolAtoms (deferred Canon module
+    // port). That bridge allocates a CompatibilityData block. Drop it
+    // here so subsequent benchmarks measure the flat-array path
+    // without any leftover compat overhead.
     mol.clearCompatibilityData();
   }
   return ret;

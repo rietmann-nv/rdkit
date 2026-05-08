@@ -766,6 +766,8 @@ RDKIT_GRAPHMOL_EXPORT void cleanUp(RWMol &mol);
    \param mol    the molecule of interest
 
 */
+RDKIT_GRAPHMOL_EXPORT void cleanUpOrganometallics(RDMol &mol);
+//! \overload
 RDKIT_GRAPHMOL_EXPORT void cleanUpOrganometallics(RWMol &mol);
 
 //! Called by the sanitizer to assign radical counts to atoms

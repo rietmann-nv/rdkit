@@ -358,20 +358,25 @@ void cleanUp(RDMol &mol) {
 
 void cleanUp(RWMol &mol) { cleanUp(mol.asRDMol()); }
 
-void cleanUpOrganometallics(RWMol &mol) {
-  auto &rdmol = mol.asRDMol();
+void cleanUpOrganometallics(RDMol &mol) {
   // At present all this does is look for single bonds between
   // non-metals and metals where the non-metal exceeds one of
   // its normal valence states, and replaces that bond with
   // a dative one from the non-metal to the metal.
+  //
+  // The outer iteration is pure flat-array work; we only bridge to the
+  // compat ROMol when needsFixing is true, because the canonical
+  // ranking module (Canon::rankMolAtoms) is still ROMol-shaped (deferred
+  // port; see EDGE_CASES.md). For inputs without metals (the canonical
+  // bench set), this function never allocates compat data.
   bool needsFixing = false;
-  for (auto atom : rdmol.atoms()) {
+  for (auto atom : mol.atoms()) {
     if (isHypervalentNonMetal(atom) && !noDative(atom.data())) {
       // see if there are any metals bonded to it by a single bond
-      for (auto bond : rdmol.atomBonds(atom.index())) {
+      for (auto bond : mol.atomBonds(atom.index())) {
         if (bond.data().getBondType() == BondEnums::BondType::SINGLE &&
             QueryOps::isMetal(
-                RDMolAtom(&rdmol, bond.data().getOtherAtomIdx(atom.index())))) {
+                RDMolAtom(&mol, bond.data().getOtherAtomIdx(atom.index())))) {
           needsFixing = true;
           break;
         }
@@ -386,9 +391,10 @@ void cleanUpOrganometallics(RWMol &mol) {
   }
 
   mol.updatePropertyCache(false);
-  // First see if anything needs doing
   std::vector<unsigned int> ranks(mol.getNumAtoms());
-  RDKit::Canon::rankMolAtoms(mol, ranks);
+  // Canon::rankMolAtoms takes ROMol; the canonical ranking module is the
+  // deferred Canon port. Bridge only on the actually-organometallic path.
+  RDKit::Canon::rankMolAtoms(mol.asROMol(), ranks);
   std::vector<std::pair<int, int>> atom_ranks;
   for (size_t i = 0; i < ranks.size(); ++i) {
     atom_ranks.push_back(std::make_pair(i, ranks[i]));
@@ -398,8 +404,12 @@ void cleanUpOrganometallics(RWMol &mol) {
               return p1.second < p2.second;
             });
   for (auto ar : atom_ranks) {
-    metalBondCleanup(rdmol, ar.first, ranks);
+    metalBondCleanup(mol, ar.first, ranks);
   }
+}
+
+void cleanUpOrganometallics(RWMol &mol) {
+  cleanUpOrganometallics(mol.asRDMol());
 }
 
 void adjustHs(RDMol &mol) {
@@ -626,15 +636,9 @@ void sanitizeMol(RDMol &mol, unsigned int &operationThatFailed,
   }
 
   // fix things like non-metal to metal bonds that should be dative.
-  // cleanUpOrganometallics tail-calls Canon::rankMolAtoms which is the
-  // deferred Canon module port (EDGE_CASES.md), so it stays RWMol-only.
-  // Bridge here: the RDMol entry point doesn't go through this branch -
-  // sanitizeMol(RWMol&) overrides the dispatcher to call cleanUpOrganometallics
-  // on the original RWMol so a static_cast<RWMol*>(new ROMol()) caller (see
-  // MolOps::getTheFragsWithQuery) still works.
   operationThatFailed = SANITIZE_CLEANUP_ORGANOMETALLICS;
   if (sanitizeOps & operationThatFailed) {
-    cleanUpOrganometallics(mol.asRWMol());
+    cleanUpOrganometallics(mol);
   }
 
   // update computed properties on atoms and bonds:
@@ -726,31 +730,7 @@ void sanitizeMol(RDMol &mol, unsigned int &operationThatFailed,
 
 void sanitizeMol(RWMol &mol, unsigned int &operationThatFailed,
                  unsigned int sanitizeOps) {
-  // We dispatch most of the pipeline to the RDMol overload, but we have to
-  // intercept SANITIZE_CLEANUP_ORGANOMETALLICS to invoke
-  // cleanUpOrganometallics on the *user's* RWMol. The deferred Canon module
-  // port means cleanUpOrganometallics is RWMol-only; calling
-  // mol.asRWMol() inside sanitizeMol(RDMol&) breaks for callers that
-  // static_cast<RWMol*>(new ROMol()) (see getTheFragsWithQuery).
-  RDMol &rdmol = mol.asRDMol();
-  // Run cleanUpOrganometallics now (if requested) on the original RWMol,
-  // then strip the bit so the RDMol dispatcher skips it.
-  if (sanitizeOps & SANITIZE_CLEANUP_ORGANOMETALLICS) {
-    // Match the dispatcher: it would clearComputedProps and run cleanUp
-    // first, so sequence is preserved by doing those, then organometallics,
-    // then dispatching the remaining ops on RDMol.
-    rdmol.clearComputedProps();
-    if (sanitizeOps & SANITIZE_CLEANUP) {
-      cleanUp(rdmol);
-    }
-    operationThatFailed = SANITIZE_CLEANUP_ORGANOMETALLICS;
-    cleanUpOrganometallics(mol);
-    sanitizeMol(rdmol, operationThatFailed,
-                sanitizeOps & ~(SANITIZE_CLEANUP_ORGANOMETALLICS |
-                                 SANITIZE_CLEANUP));
-  } else {
-    sanitizeMol(rdmol, operationThatFailed, sanitizeOps);
-  }
+  sanitizeMol(mol.asRDMol(), operationThatFailed, sanitizeOps);
 }
 
 std::vector<std::unique_ptr<MolSanitizeException>> detectChemistryProblems(
