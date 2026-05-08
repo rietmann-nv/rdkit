@@ -29,12 +29,12 @@ std::vector<RDKit::RDMol> load_rdmol_samples() {
     const bool success = RDKit::SmilesToMol(smiles, params, mol, temp);
     REQUIRE(success);
     // The default-params SmilesToMol(RDMol&) path is now native end to
-    // end (commits 297ea7237..d9e052c7e), but the
-    // SANITIZE_CLEANUP_ORGANOMETALLICS step still bridges through
-    // asRWMol() to call Canon::rankMolAtoms (deferred Canon module
-    // port). That bridge allocates a CompatibilityData block. Drop it
-    // here so subsequent benchmarks measure the flat-array path
-    // without any leftover compat overhead.
+    // end on canonical input (commits 297ea7237..97657fc7a). The four
+    // remaining bridges (Canon::rankFragmentAtoms, Canon::rankMolAtoms,
+    // and the CXSMILES stereo helpers) only fire on inputs the canonical
+    // bench set doesn't contain. As a defensive guarantee that the
+    // benchmarks read pristine flat-array RDMols, drop any compat block
+    // that an unaudited path might have allocated.
     mol.clearCompatibilityData();
   }
   return ret;
