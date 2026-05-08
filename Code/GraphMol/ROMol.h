@@ -1303,8 +1303,10 @@ typedef std::vector<ROMOL_SPTR> MOL_SPTR_VECT;
 typedef MOL_PTR_VECT::const_iterator MOL_PTR_VECT_CI;
 typedef MOL_PTR_VECT::iterator MOL_PTR_VECT_I;
 //! Number of vertices for boost VF2
+RDKIT_GRAPHMOL_EXPORT uint32_t num_vertices(const RDMol &mol);
 RDKIT_GRAPHMOL_EXPORT uint32_t num_vertices(const ROMol &mol);
 //! Number of edges for boost VF2
+RDKIT_GRAPHMOL_EXPORT uint32_t num_edges(const RDMol &mol);
 RDKIT_GRAPHMOL_EXPORT uint32_t num_edges(const ROMol &mol);
 
 };  // namespace RDKit

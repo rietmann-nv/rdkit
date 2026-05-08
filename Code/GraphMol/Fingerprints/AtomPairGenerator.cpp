@@ -29,7 +29,8 @@ AtomPairAtomInvGenerator::AtomPairAtomInvGenerator(
       df_topologicalTorsionCorrection(topologicalTorsionCorrection) {}
 
 std::vector<std::uint32_t> *AtomPairAtomInvGenerator::getAtomInvariants(
-    const ROMol &mol) const {
+    const RDMol &rdmol) const {
+  const ROMol &mol = rdmol.asROMol();
   auto *atomInvariants = new std::vector<std::uint32_t>(mol.getNumAtoms());
 
   for (const auto atom : mol.atoms()) {
@@ -176,7 +177,7 @@ AtomPairAtomEnv<OutputType>::AtomPairAtomEnv(const unsigned int atomIdFirst,
 template <typename OutputType>
 std::vector<AtomEnvironment<OutputType> *>
 AtomPairEnvGenerator<OutputType>::getEnvironments(
-    const ROMol &mol, FingerprintArguments *arguments,
+    const RDMol &rdmol, FingerprintArguments *arguments,
     const std::vector<std::uint32_t> *fromAtoms,
     const std::vector<std::uint32_t> *ignoreAtoms, const int confId,
     const AdditionalOutput *additionalOutput,
@@ -184,6 +185,7 @@ AtomPairEnvGenerator<OutputType>::getEnvironments(
     const std::vector<std::uint32_t> *,  // bondInvariants,
     const bool                           // hashResults
 ) const {
+  const ROMol &mol = rdmol.asROMol();
   const unsigned int atomCount = mol.getNumAtoms();
   PRECONDITION(!additionalOutput || !additionalOutput->atomToBits ||
                    additionalOutput->atomToBits->size() == atomCount,

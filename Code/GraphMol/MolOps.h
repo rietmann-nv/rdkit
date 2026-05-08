@@ -1069,6 +1069,10 @@ RDKIT_GRAPHMOL_EXPORT double *getAdjacencyMatrix(
 
 */
 RDKIT_GRAPHMOL_EXPORT double *getDistanceMat(
+    const RDMol &mol, bool useBO = false, bool useAtomWts = false,
+    bool force = false, const char *propNamePrefix = nullptr);
+//! \overload
+RDKIT_GRAPHMOL_EXPORT double *getDistanceMat(
     const ROMol &mol, bool useBO = false, bool useAtomWts = false,
     bool force = false, const char *propNamePrefix = nullptr);
 

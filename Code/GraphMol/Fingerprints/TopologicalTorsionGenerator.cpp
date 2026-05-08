@@ -101,7 +101,7 @@ OutputType TopologicalTorsionAtomEnv<OutputType>::getBitId(
 template <typename OutputType>
 std::vector<AtomEnvironment<OutputType> *>
 TopologicalTorsionEnvGenerator<OutputType>::getEnvironments(
-    const ROMol &mol, FingerprintArguments *arguments,
+    const RDMol &rdmol, FingerprintArguments *arguments,
     const std::vector<std::uint32_t> *fromAtoms,
     const std::vector<std::uint32_t> *ignoreAtoms,
     const int,                 // confId
@@ -109,6 +109,7 @@ TopologicalTorsionEnvGenerator<OutputType>::getEnvironments(
     const std::vector<std::uint32_t> *atomInvariants,
     const std::vector<std::uint32_t> *,  // bondInvariants
     const bool hashResults) const {
+  const ROMol &mol = rdmol.asROMol();
   auto *topologicalTorsionArguments =
       dynamic_cast<TopologicalTorsionArguments *>(arguments);
 

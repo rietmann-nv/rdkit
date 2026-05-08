@@ -9,6 +9,7 @@
 //  of the RDKit source tree.
 //
 #include <GraphMol/ROMol.h>
+#include <GraphMol/RDMol.h>
 #include <GraphMol/Atom.h>
 #include <GraphMol/Bond.h>
 #include <GraphMol/BondIterators.h>
@@ -164,7 +165,7 @@ void FloydWarshall(int dim, T *adjMat, int *pathMat,
 }  // namespace
 
 namespace MolOps {
-double *getDistanceMat(const ROMol &mol, bool useBO, bool useAtomWts,
+double *getDistanceMat(const RDMol &mol, bool useBO, bool useAtomWts,
                        bool force, const char *propNamePrefix) {
   std::string propName;
   boost::shared_array<double> sptr;
@@ -181,14 +182,13 @@ double *getDistanceMat(const ROMol &mol, bool useBO, bool useAtomWts,
   if (useAtomWts) {
     propName += "AtomWts";
   }
-  if (!force && mol.hasProp(propName)) {
-    mol.getProp(propName, sptr);
+  PropToken propToken(propName);
+  if (!force && mol.getMolPropIfPresent(propToken, sptr)) {
     return sptr.get();
   }
-  int nAts = mol.getNumAtoms();
+  const int nAts = static_cast<int>(mol.getNumAtoms());
   auto *dMat = new double[nAts * nAts];
   int i, j;
-  // initialize off diagonals to LOCAL_INF and diagonals to 0
   for (i = 0; i < nAts * nAts; i++) {
     dMat[i] = LOCAL_INF;
   }
@@ -196,16 +196,14 @@ double *getDistanceMat(const ROMol &mol, bool useBO, bool useAtomWts,
     dMat[i * nAts + i] = 0.0;
   }
 
-  ROMol::EDGE_ITER firstB, lastB;
-  boost::tie(firstB, lastB) = mol.getEdges();
-  while (firstB != lastB) {
-    const Bond *bond = mol[*firstB];
-    i = bond->getBeginAtomIdx();
-    j = bond->getEndAtomIdx();
+  for (const BondData &bond : mol.getBondDataVector()) {
+    i = bond.getBeginAtomIdx();
+    j = bond.getEndAtomIdx();
     double contrib;
     if (useBO) {
-      if (!bond->getIsAromatic()) {
-        contrib = 1. / bond->getBondTypeAsDouble();
+      if (!bond.getIsAromatic()) {
+        const uint32_t twiceBO = getTwiceBondType(bond.getBondType());
+        contrib = (twiceBO == 0) ? 1.0 : 2.0 / static_cast<double>(twiceBO);
       } else {
         contrib = 2. / 3.;
       }
@@ -214,7 +212,6 @@ double *getDistanceMat(const ROMol &mol, bool useBO, bool useAtomWts,
     }
     dMat[i * nAts + j] = contrib;
     dMat[j * nAts + i] = contrib;
-    ++firstB;
   }
 
   auto *pathMat = new int[nAts * nAts];
@@ -222,18 +219,25 @@ double *getDistanceMat(const ROMol &mol, bool useBO, bool useAtomWts,
   FloydWarshall(nAts, dMat, pathMat);
 
   if (useAtomWts) {
+    const auto &atoms = mol.getAtomDataVector();
     for (i = 0; i < nAts; i++) {
-      int anum = mol.getAtomWithIdx(i)->getAtomicNum();
+      int anum = atoms[i].getAtomicNum();
       dMat[i * nAts + i] = 6.0 / anum;
     }
   }
   sptr.reset(dMat);
-  mol.setProp(propName, sptr, true);
+  RDMol &mutableMol = const_cast<RDMol &>(mol);
+  mutableMol.setMolProp(propToken, sptr, true);
   boost::shared_array<int> iSptr(pathMat);
-  mol.setProp(propName + "_Paths", iSptr, true);
+  mutableMol.setMolProp(PropToken(propName + "_Paths"), iSptr, true);
 
   return dMat;
 };
+
+double *getDistanceMat(const ROMol &mol, bool useBO, bool useAtomWts,
+                       bool force, const char *propNamePrefix) {
+  return getDistanceMat(mol.asRDMol(), useBO, useAtomWts, force, propNamePrefix);
+}
 
 double *getDistanceMat(const ROMol &mol, const std::vector<int> &activeAtoms,
                        const std::vector<const Bond *> &bonds, bool useBO,

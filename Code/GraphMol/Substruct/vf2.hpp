@@ -10,10 +10,14 @@
  *  http://amalfi.dis.unina.it/graph/db/vflib-2.0/doc/vflib.html
  *
  */
+#include <GraphMol/RDMol.h>
+#include <GraphMol/ROMol.h>
+
 #include <boost/graph/adjacency_list.hpp>
 #include <vector>
 #include <algorithm>
 #include <cstring>
+#include <limits>
 
 #ifndef __BGL_VF2_SUB_STATE_H__
 #define __BGL_VF2_SUB_STATE_H__
@@ -22,48 +26,53 @@
 
 namespace boost {
 
-using ::RDKit::ROMol;
-using vertex_descriptor = ::RDKit::ROMol::vertex_descriptor;
-using edge_descriptor = ::RDKit::ROMol::edge_descriptor;
-using vertex_iterator = ::RDKit::ROMol::vertex_iterator;
-using edge_iterator = ::RDKit::ROMol::edge_iterator;
+using ::RDKit::RDMol;
+using vertex_descriptor = ::RDKit::RDMol::vertex_descriptor;
+using edge_descriptor = ::RDKit::RDMol::edge_descriptor;
+using vertex_iterator = ::RDKit::RDMol::vertex_iterator;
 
-// ROMol dropins for boost graph functions.
-inline size_t out_degree(vertex_descriptor v, const ROMol &g) {
-  return g.getAtomWithIdx(v)->getDegree();
+inline size_t out_degree(vertex_descriptor v, const RDMol &g) {
+  return g.getAtomDegree(static_cast<::RDKit::atomindex_t>(v));
 }
 
 inline std::pair<edge_descriptor, bool> edge(vertex_descriptor v1,
                                              vertex_descriptor v2,
-                                             const ROMol &g) {
-  auto bond = g.getBondBetweenAtoms(v1, v2);
-  if (bond) {
-    return std::make_pair(edge_descriptor(bond->getIdx()), true);
-
-  } else {
-    return std::make_pair(edge_descriptor(0), false);
+                                             const RDMol &g) {
+  std::uint32_t bondIdx = g.getBondIndexBetweenAtoms(
+      static_cast<::RDKit::atomindex_t>(v1),
+      static_cast<::RDKit::atomindex_t>(v2));
+  if (bondIdx != std::numeric_limits<std::uint32_t>::max()) {
+    return std::make_pair(edge_descriptor(bondIdx), true);
   }
-}
-inline vertex_descriptor source(edge_descriptor e, const ROMol &g) {
-  return g.getBondWithIdx(*e)->getBeginAtomIdx();
+  return std::make_pair(edge_descriptor(0), false);
 }
 
-inline vertex_descriptor target(edge_descriptor e, const ROMol &g) {
-  return g.getBondWithIdx(*e)->getEndAtomIdx();
+inline vertex_descriptor source(edge_descriptor e, const RDMol &g) {
+  return g.getBond(*e).getBeginAtomIdx();
 }
 
-inline std::pair<vertex_iterator, vertex_iterator> vertices(const ROMol &g) {
-  return g.getVertices();
+inline vertex_descriptor target(edge_descriptor e, const RDMol &g) {
+  return g.getBond(*e).getEndAtomIdx();
 }
 
-inline std::pair<ROMol::adjacency_iterator, ROMol::adjacency_iterator>
-adjacent_vertices(vertex_descriptor u, const ROMol &g) {
-  return g.getAtomNeighbors(g.getAtomWithIdx(u));
+inline std::pair<vertex_iterator, vertex_iterator> vertices(const RDMol &g) {
+  return std::make_pair(vertex_iterator(0), vertex_iterator(g.getNumAtoms()));
 }
 
-inline std::pair<ROMol::out_edge_iterator, ROMol::out_edge_iterator> out_edges(
-    vertex_descriptor u, const ROMol &g) {
-  return g.getAtomBonds(g.getAtomWithIdx(u));
+inline std::pair<::RDKit::RDMol::adjacency_iterator,
+                 ::RDKit::RDMol::adjacency_iterator>
+adjacent_vertices(vertex_descriptor u, const RDMol &g) {
+  auto [begin, end] = g.getAtomNeighbors(static_cast<::RDKit::atomindex_t>(u));
+  return {::RDKit::RDMol::adjacency_iterator{begin},
+          ::RDKit::RDMol::adjacency_iterator{end}};
+}
+
+inline std::pair<::RDKit::RDMol::out_edge_iterator,
+                 ::RDKit::RDMol::out_edge_iterator>
+out_edges(vertex_descriptor u, const RDMol &g) {
+  auto [begin, end] = g.getAtomBonds(static_cast<::RDKit::atomindex_t>(u));
+  return {::RDKit::RDMol::out_edge_iterator{begin},
+          ::RDKit::RDMol::out_edge_iterator{end}};
 }
 
 namespace detail {

@@ -37,7 +37,7 @@ class RDKIT_FINGERPRINTS_EXPORT AtomPairAtomInvGenerator
                            bool topologicalTorsionCorrection = false);
 
   std::vector<std::uint32_t> *getAtomInvariants(
-      const ROMol &mol) const override;
+      const RDMol &mol) const override;
 
   std::string infoString() const override;
   void toJSON(boost::property_tree::ptree &pt) const override;
@@ -130,7 +130,7 @@ class RDKIT_FINGERPRINTS_EXPORT AtomPairEnvGenerator
     : public AtomEnvironmentGenerator<OutputType> {
  public:
   std::vector<AtomEnvironment<OutputType> *> getEnvironments(
-      const ROMol &mol, FingerprintArguments *arguments,
+      const RDMol &mol, FingerprintArguments *arguments,
       const std::vector<std::uint32_t> *fromAtoms,
       const std::vector<std::uint32_t> *ignoreAtoms, const int confId,
       const AdditionalOutput *additionalOutput,

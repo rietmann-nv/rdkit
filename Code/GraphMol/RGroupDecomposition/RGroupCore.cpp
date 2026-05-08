@@ -512,9 +512,13 @@ std::vector<MatchVectType> RCore::matchTerminalUserRGroups(
 
     // Find what target atoms will bond to these dummies
     std::vector<std::vector<int>> neighborDummyLists;
+    const RDMol &coreRDMol = core->asRDMol();
+    const RDMol &targetRDMol = target.asRDMol();
     for (auto dummyIndex : dummyIndexes) {
       const int neighborIdx = terminalRGroupAtomToNeighbor.at(dummyIndex);
       const auto coreBond = core->getBondBetweenAtoms(dummyIndex, neighborIdx);
+      const std::uint32_t coreBondIdx = coreBond ? coreBond->getIdx()
+                                                 : std::uint32_t(-1);
       // find the atom in the target mapped to the neighbor in the core
       const int targetIdx = matchMap[neighborIdx];
       const auto targetAtom = target.getAtomWithIdx(targetIdx);
@@ -524,9 +528,13 @@ std::vector<MatchVectType> RCore::matchTerminalUserRGroups(
       for (const auto &nbrIdx :
            boost::make_iterator_range(target.getAtomNeighbors(targetAtom))) {
         if (!mappedTargetIdx.test(nbrIdx)) {
-          const auto targetBond = target.getBondBetweenAtoms(targetIdx, nbrIdx);
+          const std::uint32_t targetBondIdx =
+              targetRDMol.getBondIndexBetweenAtoms(targetIdx, nbrIdx);
           // check for bond compatibility
-          if (bondCompat(coreBond, targetBond, sssParams)) {
+          if (coreBondIdx != std::uint32_t(-1) &&
+              targetBondIdx != std::uint32_t(-1) &&
+              bondCompat(coreRDMol, coreBondIdx, targetRDMol, targetBondIdx,
+                         sssParams)) {
             available.push_back(nbrIdx);
             ++targetAtomBondsToCoreCounts[nbrIdx];
           }
@@ -702,8 +710,8 @@ std::vector<MatchVectType> RCore::matchTerminalUserRGroups(
   }
 
   auto queryMatchingMol = hasMissing ? checkCore.get() : core.get();
-  MolMatchFinalCheckFunctor molMatchFunctor(*queryMatchingMol, target,
-                                            sssParams);
+  MolMatchFinalCheckFunctor molMatchFunctor(queryMatchingMol->asRDMol(),
+                                            target.asRDMol(), sssParams);
   boost::dynamic_bitset<> targetBondsPresent(target.getNumBonds());
 
   // Filter all available mappings removing those that violate chirality or have

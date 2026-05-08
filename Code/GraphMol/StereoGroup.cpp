@@ -8,6 +8,7 @@
 
 #include "StereoGroup.h"
 #include "Atom.h"
+#include "Bond.h"
 #include "ROMol.h"
 #include "RDMol.h"
 
@@ -77,6 +78,24 @@ StereoGroupType StereoGroup::getGroupType() const { return d_grouptype; }
 
 const std::vector<Atom *> &StereoGroup::getAtoms() const { return d_atoms; }
 const std::vector<Bond *> &StereoGroup::getBonds() const { return d_bonds; }
+
+std::vector<atomindex_t> StereoGroup::getAtomIndices() const {
+  std::vector<atomindex_t> indices;
+  indices.reserve(d_atoms.size());
+  for (const auto *atom : d_atoms) {
+    indices.push_back(atom->getIdx());
+  }
+  return indices;
+}
+
+std::vector<atomindex_t> StereoGroup::getBondIndices() const {
+  std::vector<atomindex_t> indices;
+  indices.reserve(d_bonds.size());
+  for (const auto *bond : d_bonds) {
+    indices.push_back(bond->getIdx());
+  }
+  return indices;
+}
 
 void StereoGroup::setOwningMol(ROMol *mol) {
   PRECONDITION(mol, "null molecule pointer");

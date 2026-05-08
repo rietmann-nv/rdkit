@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <string>
 #include <vector>
 
 #include <GraphMol/ROMol.h>
@@ -29,14 +30,61 @@ constexpr const char *SAMPLES[] = {
     "Br.COc1ccc(/N=C/C=C2/OC(C)(C)OC(c3ccccc3)=C2)cc1",
 };
 
-std::vector<RDKit::ROMol> load_samples();
+//! Dataset selector for stress / size-scan / ring-count benches.
+//!
+//! `Canonical` corresponds to the in-header SAMPLES array. The remaining
+//! entries are loaded lazily from `Code/Bench/data/<name>.smi` via the
+//! `dataset_smiles()` accessor (RDBASE-relative, cached per process).
+enum class Dataset {
+  Canonical,
 
-//! Build the sample set directly into RDMol via the native
-//! SmilesToMol(const char*, params, RDMol&, SmilesParseTemp&) entry point.
-//! After parsing, the compatibility data populated by sanitization is
-//! discarded so that subsequent operations on the returned molecules run
-//! without compat overhead.
+  // Heavy-atom size scan
+  Size_00_20,
+  Size_20_40,
+  Size_40_60,
+  Size_60_80,
+
+  // SSSR ring-count scan
+  Rings_2,
+  Rings_3,
+  Rings_4,
+  Rings_5,
+  Rings_6,
+
+  // Edge-case datasets that target inner branches not exercised by SAMPLES
+  Radicals,
+  Organometallics,
+  HypervalentHalogens,
+  HypervalentP,
+  PreCanonicalNO2Azide,
+  Atropisomers,
+  KekulizeHard,
+};
+
+//! Short stable name for a dataset; used as the .smi filename stem and as a
+//! tag suffix in TEST_CASE titles. Do not include spaces or punctuation.
+const char *dataset_name(Dataset dataset);
+
+//! SMILES contents of a dataset. For `Dataset::Canonical` this is the
+//! in-header SAMPLES list. For all other datasets the result is loaded
+//! once per process from `$RDBASE/Code/Bench/data/<name>.smi` and cached.
+//!
+//! REQUIRE-fails if the .smi file is missing or unreadable so a
+//! mis-deployed bench binary surfaces the problem immediately.
+const std::vector<std::string> &dataset_smiles(Dataset dataset);
+
+std::vector<RDKit::ROMol> load_samples();
 std::vector<RDKit::RDMol> load_rdmol_samples();
+
+//! Per-dataset loaders. Default parameters (sanitize=true, removeHs=true)
+//! work for canonical/size/ring/radicals/kekulize_hard/atropisomers; the
+//! pre-canonical edge-case datasets (organometallics, hypervalent_*,
+//! pre_canonical_no2_azide) are intentionally not sanitize-clean and the
+//! caller should pass `sanitize=false` to keep the inputs in their
+//! pre-cleanUp form.
+std::vector<RDKit::ROMol> load_samples(Dataset dataset, bool sanitize = true);
+std::vector<RDKit::RDMol> load_rdmol_samples(Dataset dataset,
+                                             bool sanitize = true);
 
 constexpr uint64_t nth_random(uint64_t n) noexcept {
   // https://xoshiro.di.unimi.it/splitmix64.c

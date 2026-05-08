@@ -42,7 +42,8 @@ namespace RDKit {
 namespace RDKitFP {
 
 std::vector<std::uint32_t> *RDKitFPAtomInvGenerator::getAtomInvariants(
-    const ROMol &mol) const {
+    const RDMol &rdmol) const {
+  const ROMol &mol = rdmol.asROMol();
   auto *result = new std::vector<std::uint32_t>();
   result->reserve(mol.getNumAtoms());
   for (const auto atom : mol.atoms()) {
@@ -179,7 +180,7 @@ void RDKitFPEnvGenerator<OutputType>::fromJSON(
 template <typename OutputType>
 std::vector<AtomEnvironment<OutputType> *>
 RDKitFPEnvGenerator<OutputType>::getEnvironments(
-    const ROMol &mol, FingerprintArguments *arguments,
+    const RDMol &rdmol, FingerprintArguments *arguments,
     const std::vector<std::uint32_t> *fromAtoms,
     const std::vector<std::uint32_t> *,  // ignoreAtoms
     const int,                           // confId
@@ -188,6 +189,7 @@ RDKitFPEnvGenerator<OutputType>::getEnvironments(
     const std::vector<std::uint32_t> *,  // bondInvariants
     const bool                           // hashResults
 ) const {
+  const ROMol &mol = rdmol.asROMol();
   PRECONDITION(!atomInvariants || atomInvariants->size() >= mol.getNumAtoms(),
                "bad atomInvariants size");
 

@@ -25,27 +25,42 @@ class pyFinalMatchFunctor : public pyFunctor {
  public:
   pyFinalMatchFunctor(python::object obj) : dp_obj(std::move(obj)) {}
   ~pyFinalMatchFunctor() = default;
-  bool operator()(const ROMol &m, std::span<const unsigned int> match) {
+  bool operator()(const RDMol &m, std::span<const unsigned int> match) {
     // grab the GIL
     PyGILStateHolder h;
-    // boost::python doesn't handle std::span, so we need to convert the span to
-    // a vector before calling into python:
+    const ROMol &mROMol = m.asROMol();
     std::vector<unsigned int> matchVec(match.begin(), match.end());
-    return python::extract<bool>(dp_obj(boost::ref(m), boost::ref(matchVec)));
+    return python::extract<bool>(
+        dp_obj(boost::ref(mROMol), boost::ref(matchVec)));
   }
 
  private:
   python::object dp_obj;
 };
+
+//! Python bridge for SubstructMatchParameters::extraAtomCheck/extraBondCheck.
+//! The native callback receives (RDMol, idx, RDMol, idx); the python user
+//! function expects Atom-pointer / Bond-pointer references, so we resolve
+//! through the compatibility shim here.
 template <typename T>
 class pyMatchFunctor : public pyFunctor {
  public:
   pyMatchFunctor(python::object obj) : dp_obj(std::move(obj)) {}
   ~pyMatchFunctor() = default;
-  bool operator()(const T &a1, const T &a2) {
-    // grab the GIL
+  bool operator()(const RDMol &qmol, atomindex_t qIdx, const RDMol &mmol,
+                  atomindex_t mIdx) {
     PyGILStateHolder h;
-    return python::extract<bool>(dp_obj(boost::ref(a1), boost::ref(a2)));
+    if constexpr (std::is_same_v<T, Atom>) {
+      const Atom *qAt = qmol.asROMol().getAtomWithIdx(qIdx);
+      const Atom *mAt = mmol.asROMol().getAtomWithIdx(mIdx);
+      return python::extract<bool>(
+          dp_obj(boost::ref(*qAt), boost::ref(*mAt)));
+    } else {
+      const Bond *qBnd = qmol.asROMol().getBondWithIdx(qIdx);
+      const Bond *mBnd = mmol.asROMol().getBondWithIdx(mIdx);
+      return python::extract<bool>(
+          dp_obj(boost::ref(*qBnd), boost::ref(*mBnd)));
+    }
   }
 
  private:

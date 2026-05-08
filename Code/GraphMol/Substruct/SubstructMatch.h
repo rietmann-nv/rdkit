@@ -27,8 +27,10 @@
 #endif
 
 #include <GraphMol/StereoGroup.h>
+#include <GraphMol/details.h>
 
 namespace RDKit {
+class RDMol;
 class ROMol;
 class Atom;
 class Bond;
@@ -62,7 +64,7 @@ struct RDKIT_SUBSTRUCTMATCH_EXPORT SubstructMatchParameters {
                                             //!< equivalent in order to match
   std::vector<std::string> bondProperties;  //!< bond properties that must be
                                             //!< equivalent in order to match
-  std::function<bool(const ROMol &mol,
+  std::function<bool(const RDMol &mol,
                      std::span<const unsigned int> match)>
       extraFinalCheck;  //!< a function to be called at the end to validate a
                         //!< match
@@ -74,15 +76,21 @@ struct RDKIT_SUBSTRUCTMATCH_EXPORT SubstructMatchParameters {
               //!< will match atoms and bonds with unspecified stereochemistry
   bool aromaticMatchesSingleOrDouble = false;  //!< Aromatic bonds match single
                                                //!< or double bonds
-  std::function<bool(const Atom &queryAtom, const Atom &molAtom)>
-      extraAtomCheck;  //!< a function to be called after other atom comparisons
-                       //!< have passed
+  //! Callback invoked after the default atom comparison passes (or instead of
+  //! it when extraAtomCheckOverridesDefaultCheck is set). Atoms are addressed
+  //! by (molecule, index) pairs against the flat RDMol storage.
+  std::function<bool(const RDMol &queryMol, atomindex_t queryAtomIdx,
+                     const RDMol &molMol, atomindex_t molAtomIdx)>
+      extraAtomCheck;
   bool extraAtomCheckOverridesDefaultCheck =
       false;  //!< if set, only the extraAtomCheck will be used to determine
               //!< whether or not atoms match
-  std::function<bool(const Bond &queryBond, const Bond &molBond)>
-      extraBondCheck;  //!< a function to be called after other bond comparisons
-                       //!< have passed
+  //! Callback invoked after the default bond comparison passes (or instead of
+  //! it when extraBondCheckOverridesDefaultCheck is set). Bonds are addressed
+  //! by (molecule, index) pairs against the flat RDMol storage.
+  std::function<bool(const RDMol &queryMol, atomindex_t queryBondIdx,
+                     const RDMol &molMol, atomindex_t molBondIdx)>
+      extraBondCheck;
   bool extraBondCheckOverridesDefaultCheck =
       false;  //!< if set, only the extraBondCheck will be used to determine
               //!< whether or not bonds match
@@ -96,13 +104,16 @@ RDKIT_SUBSTRUCTMATCH_EXPORT std::string substructMatchParamsToJSON(
 
 //! Find a substructure match for a query in a molecule
 /*!
-    \param mol         The ROMol to be searched
-    \param query       The query ROMol
+    \param mol         The molecule to be searched
+    \param query       The query molecule
     \param matchParams Parameters controlling the matching
 
     \return The matches, if any
 
 */
+RDKIT_SUBSTRUCTMATCH_EXPORT std::vector<MatchVectType> SubstructMatch(
+    const RDMol &mol, const RDMol &query,
+    const SubstructMatchParameters &params = SubstructMatchParameters());
 RDKIT_SUBSTRUCTMATCH_EXPORT std::vector<MatchVectType> SubstructMatch(
     const ROMol &mol, const ROMol &query,
     const SubstructMatchParameters &params = SubstructMatchParameters());
@@ -110,16 +121,16 @@ RDKIT_SUBSTRUCTMATCH_EXPORT std::vector<MatchVectType> SubstructMatch(
 //! Count substructure matches for a query in a molecule without materializing
 //! the full match vectors.
 /*!
-    
-    
-    
-  \param mol         The ROMol to be searched
-  \param query       The query ROMol
+  \param mol         The molecule to be searched
+  \param query       The query molecule
   \param matchParams Parameters controlling the matching
 
   \return The number of matches found (capped by params.maxMatches)
 
 */
+RDKIT_SUBSTRUCTMATCH_EXPORT unsigned int SubstructMatchCount(
+  const RDMol &mol, const RDMol &query,
+  const SubstructMatchParameters &params = SubstructMatchParameters());
 RDKIT_SUBSTRUCTMATCH_EXPORT unsigned int SubstructMatchCount(
   const ROMol &mol, const ROMol &query,
   const SubstructMatchParameters &params = SubstructMatchParameters());
@@ -266,14 +277,14 @@ inline unsigned int SubstructMatch(ResonanceMolSupplier &resMolSupplier,
 //! mapping is a valid substructure match.
 class RDKIT_SUBSTRUCTMATCH_EXPORT MolMatchFinalCheckFunctor {
  public:
-  MolMatchFinalCheckFunctor(const ROMol &query, const ROMol &mol,
+  MolMatchFinalCheckFunctor(const RDMol &query, const RDMol &mol,
                             const SubstructMatchParameters &ps);
 
   bool operator()(const std::uint32_t q_c[], const std::uint32_t m_c[]);
 
  private:
-  const ROMol &d_query;
-  const ROMol &d_mol;
+  const RDMol &d_query;
+  const RDMol &d_mol;
   const SubstructMatchParameters &d_params;
   std::unordered_map<unsigned int, StereoGroup const *> d_molStereoGroups;
 #ifdef RDK_INTERNAL_BITSET_HAS_HASH
@@ -296,6 +307,10 @@ struct RDKIT_SUBSTRUCTMATCH_EXPORT AtomCoordsMatchFunctor {
         d_queryConfId(queryConfId),
         d_tol2(tol * tol) {};
 
+  bool operator()(const RDMol &queryMol, atomindex_t queryAtomIdx,
+                  const RDMol &targetMol, atomindex_t targetAtomIdx) const;
+  //! \overload retained for the legacy (Atom&, Atom&) call shape used by some
+  //! external code paths and by the python wrapping layer.
   bool operator()(const Atom &queryAtom, const Atom &targetAtom) const;
 };
 

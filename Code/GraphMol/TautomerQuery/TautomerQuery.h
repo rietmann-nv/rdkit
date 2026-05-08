@@ -79,11 +79,17 @@ class RDKIT_TAUTOMERQUERY_EXPORT TautomerQuery {
 
   // Substructure search
   std::vector<MatchVectType> substructOf(
+      const RDMol &mol,
+      const SubstructMatchParameters &params = SubstructMatchParameters(),
+      std::vector<ROMOL_SPTR> *matchingTautomers = nullptr) const;
+  std::vector<MatchVectType> substructOf(
       const ROMol &mol,
       const SubstructMatchParameters &params = SubstructMatchParameters(),
       std::vector<ROMOL_SPTR> *matchingTautomers = nullptr) const;
 
   // SubstructureMatch
+  bool isSubstructOf(const RDMol &mol, const SubstructMatchParameters &params =
+                                           SubstructMatchParameters());
   bool isSubstructOf(const ROMol &mol, const SubstructMatchParameters &params =
                                            SubstructMatchParameters());
 

@@ -202,17 +202,17 @@ TEST_CASE("substructure parameters", "[substruct]") {
 }
 
 namespace {
-bool no_match(const ROMol &mol, const std::span<const unsigned int> &ids) {
+bool no_match(const RDMol &mol, const std::span<const unsigned int> &ids) {
   RDUNUSED_PARAM(mol);
   RDUNUSED_PARAM(ids);
   return false;
 }
-bool always_match(const ROMol &mol, const std::span<const unsigned int> &ids) {
+bool always_match(const RDMol &mol, const std::span<const unsigned int> &ids) {
   RDUNUSED_PARAM(mol);
   RDUNUSED_PARAM(ids);
   return true;
 }
-bool bigger(const ROMol &mol, const std::span<const unsigned int> &ids) {
+bool bigger(const RDMol &mol, const std::span<const unsigned int> &ids) {
   RDUNUSED_PARAM(mol);
   return std::accumulate(ids.begin(), ids.end(), 0) > 5;
 }
@@ -930,9 +930,10 @@ TEST_CASE("extra atom and bond queries") {
 
     {
       SubstructMatchParameters ps;
-      auto atomQuery = [](const Atom &queryAtom,
-                          const Atom &targetAtom) -> bool {
-        return queryAtom.getFlags() == targetAtom.getFlags();
+      auto atomQuery = [](const RDMol &qmol, atomindex_t qIdx,
+                          const RDMol &mmol, atomindex_t mIdx) -> bool {
+        return qmol.asROMol().getAtomWithIdx(qIdx)->getFlags() ==
+               mmol.asROMol().getAtomWithIdx(mIdx)->getFlags();
       };
       ps.extraAtomCheck = atomQuery;
       auto matches = SubstructMatch(*m, *q, ps);
@@ -942,8 +943,10 @@ TEST_CASE("extra atom and bond queries") {
     }
     {
       SubstructMatchParameters ps;
-      auto bondQuery = [](const Bond &query, const Bond &target) -> bool {
-        return query.getFlags() == target.getFlags();
+      auto bondQuery = [](const RDMol &qmol, atomindex_t qIdx,
+                          const RDMol &mmol, atomindex_t mIdx) -> bool {
+        return qmol.asROMol().getBondWithIdx(qIdx)->getFlags() ==
+               mmol.asROMol().getBondWithIdx(mIdx)->getFlags();
       };
       ps.extraBondCheck = bondQuery;
       auto matches = SubstructMatch(*m, *q, ps);
@@ -969,11 +972,15 @@ TEST_CASE("extra atom and bond queries") {
     auto matches = SubstructMatch(*m, *q, ps);
     CHECK(matches.empty());
 
-    auto atomQuery = [](const Atom &queryAtom, const Atom &targetAtom) -> bool {
-      return queryAtom.getFlags() == targetAtom.getFlags();
+    auto atomQuery = [](const RDMol &qmol, atomindex_t qIdx, const RDMol &mmol,
+                        atomindex_t mIdx) -> bool {
+      return qmol.asROMol().getAtomWithIdx(qIdx)->getFlags() ==
+             mmol.asROMol().getAtomWithIdx(mIdx)->getFlags();
     };
-    auto bondQuery = [](const Bond &query, const Bond &target) -> bool {
-      return query.getFlags() == target.getFlags();
+    auto bondQuery = [](const RDMol &qmol, atomindex_t qIdx, const RDMol &mmol,
+                        atomindex_t mIdx) -> bool {
+      return qmol.asROMol().getBondWithIdx(qIdx)->getFlags() ==
+             mmol.asROMol().getBondWithIdx(mIdx)->getFlags();
     };
     ps.extraAtomCheck = atomQuery;
     ps.extraBondCheck = bondQuery;
@@ -1004,14 +1011,13 @@ TEST_CASE("extra atom and bond queries") {
     REQUIRE(q);
     {
       SubstructMatchParameters ps;
-      auto atomQuery = [](const Atom &queryAtom,
-                          const Atom &targetAtom) -> bool {
-        auto qconf = queryAtom.getOwningMol().getConformer();
-        auto tconf = targetAtom.getOwningMol().getConformer();
-        auto qpos = qconf.getAtomPos(queryAtom.getIdx());
-        auto tpos = tconf.getAtomPos(targetAtom.getIdx());
-        auto dist = (qpos - tpos).length();
-        return dist < 0.1;
+      auto atomQuery = [](const RDMol &qmol, atomindex_t qIdx,
+                          const RDMol &mmol, atomindex_t mIdx) -> bool {
+        const auto &qconf = qmol.asROMol().getConformer();
+        const auto &tconf = mmol.asROMol().getConformer();
+        auto qpos = qconf.getAtomPos(qIdx);
+        auto tpos = tconf.getAtomPos(mIdx);
+        return (qpos - tpos).length() < 0.1;
       };
       auto matches = SubstructMatch(*m, *q, ps);
       CHECK(matches.size() == 3);
@@ -1030,10 +1036,14 @@ TEST_CASE("extra atom and bond queries") {
     REQUIRE(q);
     SubstructMatchParameters ps;
     AtomCoordsMatchFunctor atomQuery;
-    // I "<heart>" C++ syntax
-    ps.extraAtomCheck =
-        std::bind(&AtomCoordsMatchFunctor::operator(), &atomQuery,
-                  std::placeholders::_1, std::placeholders::_2);
+    auto coordsBridge = [](AtomCoordsMatchFunctor *ftor) {
+      return [ftor](const RDMol &qmol, atomindex_t qIdx, const RDMol &mmol,
+                    atomindex_t mIdx) -> bool {
+        return (*ftor)(*qmol.asROMol().getAtomWithIdx(qIdx),
+                       *mmol.asROMol().getAtomWithIdx(mIdx));
+      };
+    };
+    ps.extraAtomCheck = coordsBridge(&atomQuery);
     {
       auto matches = SubstructMatch(*m, *q, ps);
       REQUIRE(matches.empty());
@@ -1076,9 +1086,7 @@ TEST_CASE("extra atom and bond queries") {
 
       SubstructMatchParameters ps2;
       AtomCoordsMatchFunctor atomQuery2(cid, -1, .15);
-      ps2.extraAtomCheck =
-          std::bind(&AtomCoordsMatchFunctor::operator(), &atomQuery2,
-                    std::placeholders::_1, std::placeholders::_2);
+      ps2.extraAtomCheck = coordsBridge(&atomQuery2);
       matches = SubstructMatch(mcp, *q, ps2);
       REQUIRE(matches.size() == 1);
       CHECK(matches[0][0].second == 3);
@@ -1095,9 +1103,7 @@ TEST_CASE("extra atom and bond queries") {
 
       SubstructMatchParameters ps2;
       AtomCoordsMatchFunctor atomQuery2(-1, cid, .15);
-      ps2.extraAtomCheck =
-          std::bind(&AtomCoordsMatchFunctor::operator(), &atomQuery2,
-                    std::placeholders::_1, std::placeholders::_2);
+      ps2.extraAtomCheck = coordsBridge(&atomQuery2);
       matches = SubstructMatch(*m, qcp, ps2);
       REQUIRE(matches.size() == 1);
       CHECK(matches[0][0].second == 3);
@@ -1109,7 +1115,8 @@ TEST_CASE("quick return when the query has more atoms than the molecule") {
   SECTION("basics") {
     SubstructMatchParameters ps;
     bool touched = false;
-    auto atomQuery = [&touched](const Atom &, const Atom &) -> bool {
+    auto atomQuery = [&touched](const RDMol &, atomindex_t, const RDMol &,
+                                atomindex_t) -> bool {
       touched = true;
       return true;
     };

@@ -20,6 +20,7 @@
 #include <boost/dynamic_bitset.hpp>
 
 namespace RDKit {
+class RDMol;
 class ROMol;
 class Atom;
 class Bond;
@@ -602,6 +603,9 @@ RDKIT_GENERICGROUPS_EXPORT ROMol *adjustQueryPropertiesWithGenericGroups(
 
 //! returns false if any of the molecule's generic atoms are not satisfied in
 /// the current match
+RDKIT_GENERICGROUPS_EXPORT bool genericAtomMatcher(
+    const RDMol &mol, const RDMol &query,
+    const std::span<const unsigned int> &match);
 RDKIT_GENERICGROUPS_EXPORT bool genericAtomMatcher(
     const ROMol &mol, const ROMol &query,
     const std::span<const unsigned int> &match);

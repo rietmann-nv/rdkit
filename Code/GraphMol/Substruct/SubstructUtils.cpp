@@ -11,6 +11,7 @@
 #include <RDGeneral/utils.h>
 #include <GraphMol/RDKitBase.h>
 #include <GraphMol/RDKitQueries.h>
+#include <GraphMol/RDMol.h>
 
 #include <RDGeneral/BoostStartInclude.h>
 #include <boost/dynamic_bitset.hpp>
@@ -20,6 +21,81 @@
 #include <RDGeneral/BoostEndInclude.h>
 
 namespace RDKit {
+
+namespace {
+
+//! Native equivalent of Atom::Match(const Atom*) operating directly on
+//! AtomData, avoiding the round-trip through the compatibility wrappers.
+bool atomDataMatch(const AtomData &qAtom, const AtomData &mAtom) {
+  if (qAtom.getAtomicNum() != mAtom.getAtomicNum()) {
+    return false;
+  }
+  if (qAtom.getAtomicNum() == 0) {
+    // dummy: only enforce isotope match when both sides specify one
+    const int qIso = qAtom.getIsotope();
+    const int mIso = mAtom.getIsotope();
+    if (qIso && mIso && qIso != mIso) {
+      return false;
+    }
+    return true;
+  }
+  if (qAtom.getFormalCharge() &&
+      qAtom.getFormalCharge() != mAtom.getFormalCharge()) {
+    return false;
+  }
+  if (qAtom.getIsotope() && qAtom.getIsotope() != mAtom.getIsotope()) {
+    return false;
+  }
+  if (qAtom.getNumRadicalElectrons() &&
+      qAtom.getNumRadicalElectrons() != mAtom.getNumRadicalElectrons()) {
+    return false;
+  }
+  return true;
+}
+
+//! Compares the atom-property entries listed in `properties` between two atoms
+//! by index. Mirrors the legacy propertyCompat<T> behavior.
+bool atomPropertyCompat(const RDMol &qmol, atomindex_t qIdx, const RDMol &mmol,
+                        atomindex_t mIdx,
+                        const std::vector<std::string> &properties) {
+  for (const auto &prop : properties) {
+    PropToken token(prop);
+    std::string qProp;
+    std::string mProp;
+    const bool qHas = qmol.getAtomPropIfPresent(token, qIdx, qProp);
+    const bool mHas = mmol.getAtomPropIfPresent(token, mIdx, mProp);
+    if (qHas && mHas) {
+      if (qProp != mProp) {
+        return false;
+      }
+    } else if (qHas || mHas) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool bondPropertyCompat(const RDMol &qmol, atomindex_t qIdx, const RDMol &mmol,
+                        atomindex_t mIdx,
+                        const std::vector<std::string> &properties) {
+  for (const auto &prop : properties) {
+    PropToken token(prop);
+    std::string qProp;
+    std::string mProp;
+    const bool qHas = qmol.getBondPropIfPresent(token, qIdx, qProp);
+    const bool mHas = mmol.getBondPropIfPresent(token, mIdx, mProp);
+    if (qHas && mHas) {
+      if (qProp != mProp) {
+        return false;
+      }
+    } else if (qHas || mHas) {
+      return false;
+    }
+  }
+  return true;
+}
+
+}  // namespace
 
 namespace detail {
 // Helper class used by the sortMatchesByDegreeOfCoreSubstitution
@@ -101,147 +177,114 @@ class ScoreMatchesByDegreeOfCoreSubstitution {
 };
 }  // namespace detail
 
-// Template version that works with Atom and Bond
-template <typename T>
-bool propertyCompat(const T *r1, const T *r2,
-                    const std::vector<std::string> &properties) {
-  PRECONDITION(r1, "bad object");
-  PRECONDITION(r2, "bad object");
-
-  for (const auto &prop : properties) {
-    std::string prop1;
-    bool hasprop1 = r1->template getPropIfPresent<std::string>(prop, prop1);
-    std::string prop2;
-    bool hasprop2 = r2->template getPropIfPresent<std::string>(prop, prop2);
-    if (hasprop1 && hasprop2) {
-      if (prop1 != prop2) {
-        return false;
-      }
-    } else if (hasprop1 || hasprop2) {
-      // only one has the property
-      return false;
-    }
-  }
-  return true;
-}
-
-// Explicit instantiations for Atom and Bond
-template bool propertyCompat<Atom>(const Atom *r1, const Atom *r2,
-                                   const std::vector<std::string> &properties);
-template bool propertyCompat<Bond>(const Bond *r1, const Bond *r2,
-                                   const std::vector<std::string> &properties);
-
-bool atomCompat(const Atom *a1, const Atom *a2,
-                const SubstructMatchParameters &ps) {
-  PRECONDITION(a1, "bad atom");
-  PRECONDITION(a2, "bad atom");
-  // std::cerr << "\t\tatomCompat: "<< a1 << " " << a1->getIdx() << "-" << a2 <<
-  // " " << a2->getIdx() << std::endl;
-
+bool atomCompat(const RDMol &qmol, atomindex_t qIdx, const RDMol &mmol,
+                atomindex_t mIdx, const SubstructMatchParameters &ps) {
   if (ps.extraAtomCheckOverridesDefaultCheck && ps.extraAtomCheck) {
-    return ps.extraAtomCheck(*a1, *a2);
+    return ps.extraAtomCheck(qmol, qIdx, mmol, mIdx);
   }
-  bool res;
-  if (ps.useQueryQueryMatches && a1->hasQuery() && a2->hasQuery()) {
-    res = static_cast<const QueryAtom *>(a1)->QueryMatch(
-        static_cast<const QueryAtom *>(a2));
+
+  const bool qHasQuery = qmol.hasAtomQuery(qIdx);
+  const bool mHasQuery = mmol.hasAtomQuery(mIdx);
+
+  bool res = false;
+  if (ps.useQueryQueryMatches && qHasQuery && mHasQuery) {
+    // Query-query match path: structural compare on the legacy query tree.
+    // queriesMatch is keyed on the Atom*-typed query form, so we bridge the
+    // two QueryAtom wrappers; this path is rarely exercised.
+    const Atom *qAtomPtr = qmol.asROMol().getAtomWithIdx(qIdx);
+    const Atom *mAtomPtr = mmol.asROMol().getAtomWithIdx(mIdx);
+    res = static_cast<const QueryAtom *>(qAtomPtr)->QueryMatch(
+        static_cast<const QueryAtom *>(mAtomPtr));
+  } else if (qHasQuery) {
+    res = qmol.getAtomQuery(qIdx)->Match(ConstRDMolAtom{&mmol, mIdx});
   } else {
-    res = a1->Match(a2);
+    res = atomDataMatch(qmol.getAtom(qIdx), mmol.getAtom(mIdx));
   }
   if (!res) {
     return false;
   }
   if (!ps.atomProperties.empty()) {
-    if (!propertyCompat(a1, a2, ps.atomProperties)) {
+    if (!atomPropertyCompat(qmol, qIdx, mmol, mIdx, ps.atomProperties)) {
       return false;
     }
   }
-  if (ps.extraAtomCheck && !ps.extraAtomCheck(*a1, *a2)) {
+  if (ps.extraAtomCheck && !ps.extraAtomCheck(qmol, qIdx, mmol, mIdx)) {
     return false;
   }
 
   return res;
 }
 
-bool chiralAtomCompat(const Atom *&a1, const Atom *&a2) {
-  /// DEPRECATED
-  PRECONDITION(a1, "bad atom");
-  PRECONDITION(a2, "bad atom");
-  bool res = a1->Match(a2);
-  if (res) {
-    std::string s1, s2;
-    bool hascode1 = a1->getPropIfPresent(common_properties::_CIPCode, s1);
-    bool hascode2 = a2->getPropIfPresent(common_properties::_CIPCode, s2);
-    if (hascode1 || hascode2) {
-      res = hascode1 && hascode2 && s1 == s2;
-    }
-  }
-  std::cerr << "\t\tchiralAtomCompat: " << a1 << " " << a1->getIdx() << "-"
-            << a2 << " " << a2->getIdx() << std::endl;
-  std::cerr << "\t\t    " << res << std::endl;
-  return res;
-}
-
-bool bondCompat(const Bond *b1, const Bond *b2,
-                const SubstructMatchParameters &ps) {
-  PRECONDITION(b1, "bad bond");
-  PRECONDITION(b2, "bad bond");
-
+bool bondCompat(const RDMol &qmol, atomindex_t qIdx, const RDMol &mmol,
+                atomindex_t mIdx, const SubstructMatchParameters &ps) {
   if (ps.extraBondCheckOverridesDefaultCheck && ps.extraBondCheck) {
-    return ps.extraBondCheck(*b1, *b2);
+    return ps.extraBondCheck(qmol, qIdx, mmol, mIdx);
   }
 
-  bool res;
+  const BondData &qBond = qmol.getBond(qIdx);
+  const BondData &mBond = mmol.getBond(mIdx);
+  const bool qHasQuery = qmol.hasBondQuery(qIdx);
+  const bool mHasQuery = mmol.hasBondQuery(mIdx);
 
-  auto isConjugatedSingleOrDoubleBond([](const Bond *bond) {
-    return bond->getIsConjugated() && (bond->getBondType() == Bond::SINGLE ||
-                                       bond->getBondType() == Bond::DOUBLE);
-  });
-  auto isSingleOrDoubleBond([](const Bond *bond) {
-    return (bond->getBondType() == Bond::SINGLE ||
-            bond->getBondType() == Bond::DOUBLE);
-  });
+  using BondEnums::BondType;
+  auto isConjugatedSingleOrDouble = [&](const BondData &bond) {
+    return bond.getIsConjugated() && (bond.getBondType() == BondType::SINGLE ||
+                                      bond.getBondType() == BondType::DOUBLE);
+  };
+  auto isSingleOrDouble = [&](const BondData &bond) {
+    return bond.getBondType() == BondType::SINGLE ||
+           bond.getBondType() == BondType::DOUBLE;
+  };
 
-  if (ps.useQueryQueryMatches && b1->hasQuery() && b2->hasQuery()) {
-    res = static_cast<const QueryBond *>(b1)->QueryMatch(
-        static_cast<const QueryBond *>(b2));
-  } else if (ps.aromaticMatchesConjugated && !b1->hasQuery() &&
-             !b2->hasQuery() &&
-             ((b1->getBondType() == Bond::AROMATIC &&
-               b2->getBondType() == Bond::AROMATIC) ||
-              (b1->getBondType() == Bond::AROMATIC &&
-               isConjugatedSingleOrDoubleBond(b2)) ||
-              (b2->getBondType() == Bond::AROMATIC &&
-               isConjugatedSingleOrDoubleBond(b1)))) {
+  bool res = false;
+  if (ps.useQueryQueryMatches && qHasQuery && mHasQuery) {
+    const Bond *qBondPtr = qmol.asROMol().getBondWithIdx(qIdx);
+    const Bond *mBondPtr = mmol.asROMol().getBondWithIdx(mIdx);
+    res = static_cast<const QueryBond *>(qBondPtr)->QueryMatch(
+        static_cast<const QueryBond *>(mBondPtr));
+  } else if (ps.aromaticMatchesConjugated && !qHasQuery && !mHasQuery &&
+             ((qBond.getBondType() == BondType::AROMATIC &&
+               mBond.getBondType() == BondType::AROMATIC) ||
+              (qBond.getBondType() == BondType::AROMATIC &&
+               isConjugatedSingleOrDouble(mBond)) ||
+              (mBond.getBondType() == BondType::AROMATIC &&
+               isConjugatedSingleOrDouble(qBond)))) {
     res = true;
-  } else if (ps.aromaticMatchesSingleOrDouble && !b1->hasQuery() &&
-             !b2->hasQuery() &&
-             ((b1->getBondType() == Bond::AROMATIC &&
-               b2->getBondType() == Bond::AROMATIC) ||
-              (b1->getBondType() == Bond::AROMATIC &&
-               isSingleOrDoubleBond(b2)) ||
-              (b2->getBondType() == Bond::AROMATIC &&
-               isSingleOrDoubleBond(b1)))) {
+  } else if (ps.aromaticMatchesSingleOrDouble && !qHasQuery && !mHasQuery &&
+             ((qBond.getBondType() == BondType::AROMATIC &&
+               mBond.getBondType() == BondType::AROMATIC) ||
+              (qBond.getBondType() == BondType::AROMATIC &&
+               isSingleOrDouble(mBond)) ||
+              (mBond.getBondType() == BondType::AROMATIC &&
+               isSingleOrDouble(qBond)))) {
+    res = true;
+  } else if (qHasQuery) {
+    res = qmol.getBondQuery(qIdx)->Match(ConstRDMolBond{&mmol, mIdx});
+  } else if (qBond.getBondType() == BondType::UNSPECIFIED ||
+             mBond.getBondType() == BondType::UNSPECIFIED) {
     res = true;
   } else {
-    res = b1->Match(b2);
+    res = qBond.getBondType() == mBond.getBondType();
   }
   if (!res) {
     return false;
   }
-  if (b1->getBondType() == Bond::DATIVE && b2->getBondType() == Bond::DATIVE) {
-    // for dative bonds we need to make sure that the direction also matches:
-    if (!b1->getBeginAtom()->Match(b2->getBeginAtom()) ||
-        !b1->getEndAtom()->Match(b2->getEndAtom())) {
+  if (qBond.getBondType() == BondType::DATIVE &&
+      mBond.getBondType() == BondType::DATIVE) {
+    // For dative bonds the direction must also match.
+    if (!atomDataMatch(qmol.getAtom(qBond.getBeginAtomIdx()),
+                       mmol.getAtom(mBond.getBeginAtomIdx())) ||
+        !atomDataMatch(qmol.getAtom(qBond.getEndAtomIdx()),
+                       mmol.getAtom(mBond.getEndAtomIdx()))) {
       return false;
     }
   }
   if (!ps.bondProperties.empty()) {
-    if (!propertyCompat(b1, b2, ps.bondProperties)) {
+    if (!bondPropertyCompat(qmol, qIdx, mmol, mIdx, ps.bondProperties)) {
       return false;
     }
   }
-  if (ps.extraBondCheck && !ps.extraBondCheck(*b1, *b2)) {
+  if (ps.extraBondCheck && !ps.extraBondCheck(qmol, qIdx, mmol, mIdx)) {
     return false;
   }
 

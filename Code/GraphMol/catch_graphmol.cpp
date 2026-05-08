@@ -5065,3 +5065,75 @@ TEST_CASE("duplicate atoms/bonds in StereoGroups") {
         ValueErrorException);
   }
 }
+
+TEST_CASE(
+    "SmilesToMol(RDMol&) preserves aromatic atom flags after sanitize",
+    "[bug][rdmol][smiles][aromaticity]") {
+  // Regression: SmilesToMol(RDMol&, ...) was leaving aromatic ring atoms with
+  // getIsAromatic() == false while correctly marking the ring bonds aromatic.
+  // The legacy MolFromSmiles(ROMol) path sets both. Aromatic atom flags are
+  // load-bearing for SMARTS substructure matching against lowercase aromatic
+  // queries (`c`, `n`, `o`).
+  RDKit::SmilesParserParams params;
+  RDKit::SmilesParseTemp temp;
+  const std::vector<std::string> cases = {
+      "c1ccccc1",       "c1ccncc1", "Cc1ccccc1", "Cc1ccc(C)cc1",
+      "[N+](=O)([O-])c1ccccc1",
+  };
+  for (const auto &smi : cases) {
+    INFO("smiles=" << smi);
+    auto romol = v2::SmilesParse::MolFromSmiles(smi);
+    REQUIRE(romol);
+    RDMol rdmol;
+    bool ok = SmilesToMol(smi.c_str(), params, rdmol, temp);
+    REQUIRE(ok);
+    REQUIRE(rdmol.getNumAtoms() == romol->getNumAtoms());
+    for (uint32_t i = 0; i < romol->getNumAtoms(); ++i) {
+      INFO("atom idx=" << i);
+      CHECK(romol->getAtomWithIdx(i)->getIsAromatic() ==
+            rdmol.getAtom(i).getIsAromatic());
+    }
+    for (uint32_t i = 0; i < romol->getNumBonds(); ++i) {
+      INFO("bond idx=" << i);
+      CHECK(romol->getBondWithIdx(i)->getIsAromatic() ==
+            rdmol.getBond(i).getIsAromatic());
+    }
+  }
+}
+
+TEST_CASE("fastFindRings(ROMol) thunks to native RDMol body",
+          "[bug][rdmol][rings]") {
+  // Regression: fastFindRings(ROMol) used to have its own legacy DFS body that
+  // did not share the native RDMol implementation, which is both a policy
+  // violation and a correctness risk if the two implementations drift apart.
+  // The fix collapses fastFindRings(ROMol) to a thunk; both paths must
+  // produce identical RingInfoCache contents.
+  const std::vector<std::string> cases = {
+      "C1CCCCC1",                 // cyclohexane
+      "c1ccccc1",                 // benzene
+      "C1CC2CCC1CC2",             // bicyclic
+      "C1CC2(CC1)CCCCC2",         // spiro
+      "c1ccc2ccccc2c1",           // naphthalene (fused)
+      "C1CCC2(CC1)C3CCCCC3CC2",   // polycyclic
+      "CCO",                      // acyclic (no rings)
+  };
+  for (const auto &smi : cases) {
+    INFO("smiles=" << smi);
+    SmilesParserParams ps;
+    ps.sanitize = false;  // skip sanitize so we test fastFindRings in isolation
+    std::unique_ptr<RWMol> mol(SmilesToMol(smi, ps));
+    REQUIRE(mol);
+    MolOps::fastFindRings(*mol);
+
+    std::unique_ptr<RWMol> molDirect(SmilesToMol(smi, ps));
+    REQUIRE(molDirect);
+    RingInfoCache native;
+    MolOps::fastFindRings(molDirect->asRDMol(), native);
+
+    const RingInfoCache &thunked = mol->asRDMol().getRingInfo();
+    CHECK(native.numRings() == thunked.numRings());
+    REQUIRE(native.ringBegins == thunked.ringBegins);
+    REQUIRE(native.atomsInRings == thunked.atomsInRings);
+    REQUIRE(native.bondsInRings == thunked.bondsInRings);
+  }
+}

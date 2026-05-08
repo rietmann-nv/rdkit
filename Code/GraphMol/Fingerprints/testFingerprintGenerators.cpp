@@ -957,7 +957,7 @@ void testMorganFPFeatureInvs() {
     mol = SmilesToMol("Cc1ccccc1");
     TEST_ASSERT(mol);
     auto *invGen = new MorganFingerprint::MorganFeatureAtomInvGenerator();
-    std::vector<std::uint32_t> *invars = invGen->getAtomInvariants(*mol);
+    std::vector<std::uint32_t> *invars = invGen->getAtomInvariants(mol->asRDMol());
     TEST_ASSERT((*invars)[0] == 0);
     TEST_ASSERT((*invars)[1] != 0);
     TEST_ASSERT((*invars)[1] == (*invars)[2]);
@@ -974,7 +974,7 @@ void testMorganFPFeatureInvs() {
     mol = SmilesToMol("FCCCl");
     TEST_ASSERT(mol);
     auto *invGen = new MorganFingerprint::MorganFeatureAtomInvGenerator();
-    std::vector<std::uint32_t> *invars = invGen->getAtomInvariants(*mol);
+    std::vector<std::uint32_t> *invars = invGen->getAtomInvariants(mol->asRDMol());
     TEST_ASSERT((*invars)[1] == (*invars)[2]);
     TEST_ASSERT((*invars)[1] == 0);
     TEST_ASSERT((*invars)[0] == (*invars)[3]);
@@ -998,7 +998,7 @@ void testMorganFPFeatureInvs() {
     auto *invGen =
         new MorganFingerprint::MorganFeatureAtomInvGenerator(&patterns);
 
-    std::vector<std::uint32_t> *invars = invGen->getAtomInvariants(*mol);
+    std::vector<std::uint32_t> *invars = invGen->getAtomInvariants(mol->asRDMol());
     TEST_ASSERT((*invars)[0] != 0);
     TEST_ASSERT((*invars)[1] != 0);
     TEST_ASSERT((*invars)[0] != (*invars)[1]);
@@ -1404,7 +1404,7 @@ void testCustomInvariants() {
 
   mol = SmilesToMol("CCCCC");
   std::vector<std::uint32_t> *customInvariants =
-      atomInvariantsGenerator->getAtomInvariants(*mol);
+      atomInvariantsGenerator->getAtomInvariants(mol->asRDMol());
   fp1 = morganGenerator->getSparseCountFingerprint(*mol);
   fp2 = defaultMorganGenerator->getSparseCountFingerprint(
       *mol, nullptr, nullptr, -1, nullptr, customInvariants);

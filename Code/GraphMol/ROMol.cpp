@@ -787,8 +787,12 @@ template RDKIT_GRAPHMOL_EXPORT void ROMol::load<boost::archive::text_iarchive>(
     boost::archive::text_iarchive &, const unsigned int);
 #endif  // RDK_USE_BOOST_SERIALIZATION
 
-uint32_t num_vertices(const ROMol &mol) { return mol.getNumAtoms(); }
+uint32_t num_vertices(const RDMol &mol) { return mol.getNumAtoms(); }
+uint32_t num_vertices(const ROMol &mol) {
+  return num_vertices(mol.asRDMol());
+}
 
-uint32_t num_edges(const ROMol &mol) { return mol.getNumBonds(); }
+uint32_t num_edges(const RDMol &mol) { return mol.getNumBonds(); }
+uint32_t num_edges(const ROMol &mol) { return num_edges(mol.asRDMol()); }
 
 }  // namespace RDKit

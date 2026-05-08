@@ -454,7 +454,7 @@ TEST_CASE("github #6679: suspicious value for atom pair code calculation") {
     for (const auto &pr : data) {
       auto mol = v2::SmilesParse::MolFromSmiles(pr.first);
       REQUIRE(mol);
-      std::unique_ptr<UINT_VECT> invs{invg.getAtomInvariants(*mol)};
+      std::unique_ptr<UINT_VECT> invs{invg.getAtomInvariants(mol->asRDMol())};
       INFO(pr.first);
       CHECK(*invs == pr.second);
     }

@@ -10,6 +10,7 @@
 
 #include "TautomerQuery.h"
 #include <functional>
+#include <limits>
 #include <set>
 #include <utility>
 #include <span>
@@ -103,16 +104,10 @@ class TautomerQueryMatcher {
         d_params(params),
         d_matchingTautomers(matchingTautomers) {}
 
-  bool match(const ROMol &mol, const std::span<const unsigned int> &match) {
-#ifdef VERBOSE
-    std::cout << "Checking template match" << std::endl;
-#endif
-
+  bool match(const RDMol &mol, const std::span<const unsigned int> &match) {
+    const ROMol &molROMol = mol.asROMol();
     for (auto tautomer : d_tautomerQuery.getTautomers()) {
-#ifdef VERBOSE
-      std::cout << "Checking Tautomer " << MolToSmiles(*tautomer) << std::endl;
-#endif
-      if (d_tautomerQuery.matchTautomer(mol, *tautomer, match, d_params)) {
+      if (d_tautomerQuery.matchTautomer(molROMol, *tautomer, match, d_params)) {
         auto matchingTautomer = d_params.extraFinalCheck
                                     ? d_params.extraFinalCheck(mol, match)
                                     : true;
@@ -209,37 +204,24 @@ bool TautomerQuery::matchTautomer(
     const ROMol &mol, const ROMol &tautomer,
     const std::span<const unsigned int> &match,
     const SubstructMatchParameters &params) const {
+  const RDMol &qrdmol = tautomer.asRDMol();
+  const RDMol &mrdmol = mol.asRDMol();
   for (auto idx : d_modifiedAtoms) {
-    const auto queryAtom = tautomer.getAtomWithIdx(idx);
-    const auto targetAtom = mol.getAtomWithIdx(match[idx]);
-#ifdef VERBOSE
-    std::cout << "Query atom " << queryAtom->getSymbol() << " target atom "
-              << targetAtom->getSymbol() << std::endl;
-#endif
-    if (!atomCompat(queryAtom, targetAtom, params)) {
-#ifdef VERBOSE
-      std::cout << "Atom incompatibility" << std::endl;
-#endif
+    if (!atomCompat(qrdmol, idx, mrdmol, match[idx], params)) {
       return false;
     }
   }
 
   for (auto idx : d_modifiedBonds) {
-    const auto queryBond = tautomer.getBondWithIdx(idx);
-    const auto beginIdx = queryBond->getBeginAtomIdx();
-    const auto endIdx = queryBond->getEndAtomIdx();
-    const auto targetBeginIdx = match[beginIdx];
-    const auto targetEndIdx = match[endIdx];
-    const auto targetBond =
-        mol.getBondBetweenAtoms(targetBeginIdx, targetEndIdx);
-#ifdef VERBOSE
-    std::cout << "Query bond " << queryBond->getBondType() << " target bond "
-              << targetBond->getBondType() << std::endl;
-#endif
-    if (!bondCompat(queryBond, targetBond, params)) {
-#ifdef VERBOSE
-      std::cout << "Bond incompatibility" << std::endl;
-#endif
+    const BondData &queryBond = qrdmol.getBond(idx);
+    const auto targetBeginIdx = match[queryBond.getBeginAtomIdx()];
+    const auto targetEndIdx = match[queryBond.getEndAtomIdx()];
+    const std::uint32_t mBondIdx =
+        mrdmol.getBondIndexBetweenAtoms(targetBeginIdx, targetEndIdx);
+    if (mBondIdx == std::numeric_limits<std::uint32_t>::max()) {
+      return false;
+    }
+    if (!bondCompat(qrdmol, idx, mrdmol, mBondIdx, params)) {
       return false;
     }
   }
@@ -251,53 +233,49 @@ bool TautomerQuery::matchTautomer(
 }
 
 std::vector<MatchVectType> TautomerQuery::substructOf(
-    const ROMol &mol, const SubstructMatchParameters &params,
+    const RDMol &mol, const SubstructMatchParameters &params,
     std::vector<ROMOL_SPTR> *matchingTautomers) const {
   if (matchingTautomers) {
     matchingTautomers->clear();
   }
 
-#ifdef VERBOSE
-  std::cout << "Tautomer search with query " << MolToSmiles(*d_templateMolecule)
-            << " on " << MolToSmiles(mol) << " max matches "
-            << params.maxMatches << std::endl;
-#endif
   SubstructMatchParameters templateParams(params);
-  // need to check all mappings of template to target
   templateParams.uniquify = false;
 
   TautomerQueryMatcher tautomerQueryMatcher(*this, params, matchingTautomers);
-  // use this functor as a final check to see if any tautomer matches the target
   auto checker = [&tautomerQueryMatcher](
-                     const ROMol &mol,
+                     const RDMol &mol,
                      const std::span<const unsigned int> &match) mutable {
     return tautomerQueryMatcher.match(mol, match);
   };
   templateParams.extraFinalCheck = checker;
 
-  auto matches =
-      RDKit::SubstructMatch(mol, *d_templateMolecule, templateParams);
-
-#ifdef VERBOSE
-  std::cout << "Found " << matches.size() << " matches " << std::endl;
-#endif
+  auto matches = RDKit::SubstructMatch(mol, d_templateMolecule->asRDMol(),
+                                       templateParams);
 
   if (params.uniquify && matches.size() > 1) {
     removeTautomerDuplicates(matches, matchingTautomers, mol.getNumAtoms());
-#ifdef VERBOSE
-    std::cout << "After removing duplicates " << matches.size() << " matches "
-              << std::endl;
-#endif
   }
   return matches;
 }
 
-bool TautomerQuery::isSubstructOf(const ROMol &mol,
+std::vector<MatchVectType> TautomerQuery::substructOf(
+    const ROMol &mol, const SubstructMatchParameters &params,
+    std::vector<ROMOL_SPTR> *matchingTautomers) const {
+  return substructOf(mol.asRDMol(), params, matchingTautomers);
+}
+
+bool TautomerQuery::isSubstructOf(const RDMol &mol,
                                   const SubstructMatchParameters &params) {
   SubstructMatchParameters params2(params);
   params2.maxMatches = 1;
   auto matches = substructOf(mol, params2);
   return matches.size() > 0;
+}
+
+bool TautomerQuery::isSubstructOf(const ROMol &mol,
+                                  const SubstructMatchParameters &params) {
+  return isSubstructOf(mol.asRDMol(), params);
 }
 
 ExplicitBitVect *TautomerQuery::patternFingerprintTemplate(

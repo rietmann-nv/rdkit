@@ -208,12 +208,12 @@ std::vector<std::string> defaultFeatureSmarts(smartsPatterns,
 typedef boost::flyweight<boost::flyweights::key_value<std::string, ss_matcher>,
                          boost::flyweights::no_tracking>
     pattern_flyweight;
-void getFeatureInvariants(const ROMol &mol, std::vector<uint32_t> &invars,
+void getFeatureInvariants(const RDMol &mol, std::vector<std::uint32_t> &invars,
                           const std::vector<const ROMol *> *patterns) {
-  unsigned int nAtoms = mol.getNumAtoms();
+  const std::uint32_t nAtoms = mol.getNumAtoms();
   PRECONDITION(invars.size() >= nAtoms, "vector too small");
 
-  auto useLocalPatterns = patterns == nullptr;
+  const bool useLocalPatterns = patterns == nullptr;
   std::vector<const ROMol *> featureMatchers;
   if (useLocalPatterns) {
     featureMatchers.reserve(defaultFeatureSmarts.size());
@@ -225,44 +225,61 @@ void getFeatureInvariants(const ROMol &mol, std::vector<uint32_t> &invars,
   }
   std::fill(invars.begin(), invars.end(), 0);
   auto &queries = (useLocalPatterns ? featureMatchers : *patterns);
-  for (unsigned int i = 0; i < queries.size(); ++i) {
-    unsigned int mask = 1 << i;
-    std::vector<MatchVectType> matchVect;
-    // to maintain thread safety, we have to copy the pattern
-    // molecules:
-    SubstructMatch(mol, ROMol(*queries[i], true), matchVect);
-    for (const auto &mvIt : matchVect) {
+  for (std::uint32_t i = 0; i < queries.size(); ++i) {
+    const std::uint32_t mask = 1u << i;
+    // to maintain thread safety, we have to copy the pattern molecules; the
+    // pattern source is still ROMol (`patterns` is part of the public API and
+    // the SMARTS-built matchers come back as ROMol), but the match itself
+    // runs native against the target via the RDMol SubstructMatch path.
+    ROMol queryCopy(*queries[i], true);
+    const auto matches = SubstructMatch(mol, queryCopy.asRDMol());
+    for (const auto &mvIt : matches) {
       for (const auto &mIt : mvIt) {
         invars[mIt.second] |= mask;
       }
     }
   }
-}  // end of getFeatureInvariants()
+}
 
-void getConnectivityInvariants(const ROMol &mol, std::vector<uint32_t> &invars,
+void getFeatureInvariants(const ROMol &mol, std::vector<std::uint32_t> &invars,
+                          const std::vector<const ROMol *> *patterns) {
+  getFeatureInvariants(mol.asRDMol(), invars, patterns);
+}
+
+void getConnectivityInvariants(const RDMol &mol,
+                               std::vector<std::uint32_t> &invars,
                                bool includeRingMembership) {
-  unsigned int nAtoms = mol.getNumAtoms();
+  const std::uint32_t nAtoms = mol.getNumAtoms();
   PRECONDITION(invars.size() >= nAtoms, "vector too small");
-  gboost::hash<std::vector<uint32_t>> vectHasher;
-  for (unsigned int i = 0; i < nAtoms; ++i) {
-    Atom const *atom = mol.getAtomWithIdx(i);
-    std::vector<uint32_t> components;
-    components.push_back(atom->getAtomicNum());
-    components.push_back(atom->getTotalDegree());
-    components.push_back(atom->getTotalNumHs(true));
-    components.push_back(atom->getFormalCharge());
-    int deltaMass = static_cast<int>(
-        atom->getMass() -
-        PeriodicTable::getTable()->getAtomicWeight(atom->getAtomicNum()));
+  gboost::hash<std::vector<std::uint32_t>> vectHasher;
+  const PeriodicTable *periodicTable = PeriodicTable::getTable();
+  const auto &atoms = mol.getAtomDataVector();
+  const RingInfoCache &ringInfo = mol.getRingInfo();
+  std::vector<std::uint32_t> components;
+  components.reserve(6);
+  for (std::uint32_t i = 0; i < nAtoms; ++i) {
+    const AtomData &atom = atoms[i];
+    components.clear();
+    components.push_back(atom.getAtomicNum());
+    components.push_back(mol.getAtomTotalDegree(i));
+    components.push_back(mol.getAtomTotalNumHs(i, /*includeNeighbors=*/true));
+    components.push_back(atom.getFormalCharge());
+    const int deltaMass = static_cast<int>(
+        atom.getMass() - periodicTable->getAtomicWeight(atom.getAtomicNum()));
     components.push_back(deltaMass);
 
-    if (includeRingMembership &&
-        atom->getOwningMol().getRingInfo()->numAtomRings(atom->getIdx())) {
+    if (includeRingMembership && ringInfo.numAtomRings(i)) {
       components.push_back(1);
     }
     invars[i] = vectHasher(components);
   }
-}  // end of getConnectivityInvariants()
+}
+
+void getConnectivityInvariants(const ROMol &mol,
+                               std::vector<std::uint32_t> &invars,
+                               bool includeRingMembership) {
+  getConnectivityInvariants(mol.asRDMol(), invars, includeRingMembership);
+}
 
 }  // namespace MorganFingerprints
 

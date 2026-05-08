@@ -9,6 +9,8 @@
 
 using namespace RDKit;
 
+using bench_common::Dataset;
+
 TEST_CASE("ROMol copy constructor", "[mol]") {
   auto samples = bench_common::load_samples();
   BENCHMARK_ADVANCED("ROMol copy constructor")(
@@ -133,3 +135,118 @@ TEST_CASE("RDMol::getNumHeavyAtoms", "[mol][rdmol]") {
     return sum;
   };
 }
+
+// ---------------------------------------------------------------------------
+// Per-bucket size + ring-count variants. Memory pressure tests are NOT
+// duplicated -- they're parameter-tuned for the canonical set's mol size and
+// would need separate sizing per bucket; if/when needed, they can be added
+// later.
+
+#define BENCH_ROMOL_COPY(DATASET, SUFFIX, TAG)                                 \
+  TEST_CASE("ROMol copy constructor " SUFFIX, "[mol]" TAG) {                   \
+    auto samples = bench_common::load_samples(DATASET);                        \
+    BENCHMARK_ADVANCED("ROMol copy constructor " SUFFIX)(                      \
+        Catch::Benchmark::Chronometer meter) {                                 \
+      std::vector<Catch::Benchmark::storage_for<ROMol>> storage(               \
+          meter.runs() * samples.size());                                      \
+      meter.measure([&](int i) {                                               \
+        for (size_t sample = 0; sample < samples.size(); ++sample) {           \
+          storage[i * samples.size() + sample].construct(samples[sample]);     \
+        }                                                                      \
+      });                                                                      \
+    };                                                                         \
+  }
+
+#define BENCH_ROMOL_DTOR(DATASET, SUFFIX, TAG)                                 \
+  TEST_CASE("ROMol destructor " SUFFIX, "[mol]" TAG) {                         \
+    auto samples = bench_common::load_samples(DATASET);                        \
+    BENCHMARK_ADVANCED("ROMol destructor " SUFFIX)(                            \
+        Catch::Benchmark::Chronometer meter) {                                 \
+      std::vector<Catch::Benchmark::destructable_object<ROMol>> storage(       \
+          meter.runs() * samples.size());                                      \
+      for (size_t i = 0; i < storage.size(); ++i) {                            \
+        storage[i].construct(samples[i % samples.size()]);                     \
+      }                                                                        \
+      meter.measure([&](int i) {                                               \
+        for (size_t sample = 0; sample < samples.size(); ++sample) {           \
+          storage[i * samples.size() + sample].destruct();                     \
+        }                                                                      \
+      });                                                                      \
+    };                                                                         \
+  }
+
+#define BENCH_RDMOL_COPY(DATASET, SUFFIX, TAG)                                 \
+  TEST_CASE("RDMol copy constructor " SUFFIX, "[mol][rdmol]" TAG) {            \
+    auto samples = bench_common::load_rdmol_samples(DATASET);                  \
+    BENCHMARK_ADVANCED("RDMol copy constructor " SUFFIX)(                      \
+        Catch::Benchmark::Chronometer meter) {                                 \
+      std::vector<Catch::Benchmark::storage_for<RDMol>> storage(               \
+          meter.runs() * samples.size());                                      \
+      meter.measure([&](int i) {                                               \
+        for (size_t sample = 0; sample < samples.size(); ++sample) {           \
+          storage[i * samples.size() + sample].construct(samples[sample]);     \
+        }                                                                      \
+      });                                                                      \
+    };                                                                         \
+  }
+
+#define BENCH_RDMOL_DTOR(DATASET, SUFFIX, TAG)                                 \
+  TEST_CASE("RDMol destructor " SUFFIX, "[mol][rdmol]" TAG) {                  \
+    auto samples = bench_common::load_rdmol_samples(DATASET);                  \
+    BENCHMARK_ADVANCED("RDMol destructor " SUFFIX)(                            \
+        Catch::Benchmark::Chronometer meter) {                                 \
+      std::vector<Catch::Benchmark::destructable_object<RDMol>> storage(       \
+          meter.runs() * samples.size());                                      \
+      for (size_t i = 0; i < storage.size(); ++i) {                            \
+        storage[i].construct(samples[i % samples.size()]);                     \
+      }                                                                        \
+      meter.measure([&](int i) {                                               \
+        for (size_t sample = 0; sample < samples.size(); ++sample) {           \
+          storage[i * samples.size() + sample].destruct();                     \
+        }                                                                      \
+      });                                                                      \
+    };                                                                         \
+  }
+
+#define BENCH_ROMOL_HEAVYATOMS(DATASET, SUFFIX, TAG)                           \
+  TEST_CASE("ROMol::getNumHeavyAtoms " SUFFIX, "[mol]" TAG) {                  \
+    auto samples = bench_common::load_samples(DATASET);                        \
+    BENCHMARK("ROMol::getNumHeavyAtoms " SUFFIX) {                             \
+      auto sum = 0;                                                            \
+      for (auto &mol : samples) {                                              \
+        sum += mol.getNumHeavyAtoms();                                         \
+      }                                                                        \
+      return sum;                                                              \
+    };                                                                         \
+  }
+
+#define BENCH_RDMOL_HEAVYATOMS(DATASET, SUFFIX, TAG)                           \
+  TEST_CASE("RDMol::getNumHeavyAtoms " SUFFIX, "[mol][rdmol]" TAG) {           \
+    auto samples = bench_common::load_rdmol_samples(DATASET);                  \
+    BENCHMARK("RDMol::getNumHeavyAtoms " SUFFIX) {                             \
+      auto sum = 0;                                                            \
+      for (auto &mol : samples) {                                              \
+        sum += mol.getNumHeavyAtoms();                                         \
+      }                                                                        \
+      return sum;                                                              \
+    };                                                                         \
+  }
+
+#define BENCH_MOL_FOR(DATASET, SUFFIX, TAG)                                    \
+  BENCH_ROMOL_COPY(DATASET, SUFFIX, TAG)                                       \
+  BENCH_ROMOL_DTOR(DATASET, SUFFIX, TAG)                                       \
+  BENCH_RDMOL_COPY(DATASET, SUFFIX, TAG)                                       \
+  BENCH_RDMOL_DTOR(DATASET, SUFFIX, TAG)                                       \
+  BENCH_ROMOL_HEAVYATOMS(DATASET, SUFFIX, TAG)                                 \
+  BENCH_RDMOL_HEAVYATOMS(DATASET, SUFFIX, TAG)
+
+BENCH_MOL_FOR(Dataset::Size_00_20, "size 00-20", "[size_00_20]")
+BENCH_MOL_FOR(Dataset::Size_20_40, "size 20-40", "[size_20_40]")
+BENCH_MOL_FOR(Dataset::Size_40_60, "size 40-60", "[size_40_60]")
+BENCH_MOL_FOR(Dataset::Size_60_80, "size 60-80", "[size_60_80]")
+
+BENCH_MOL_FOR(Dataset::Rings_2, "rings 2", "[rings_2]")
+BENCH_MOL_FOR(Dataset::Rings_3, "rings 3", "[rings_3]")
+BENCH_MOL_FOR(Dataset::Rings_4, "rings 4", "[rings_4]")
+BENCH_MOL_FOR(Dataset::Rings_5, "rings 5", "[rings_5]")
+BENCH_MOL_FOR(Dataset::Rings_6, "rings 6", "[rings_6]")

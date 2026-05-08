@@ -11,6 +11,9 @@
 #include <DataStructs/SparseIntVect.h>
 #include <DataStructs/ExplicitBitVect.h>
 #include <DataStructs/SparseBitVect.h>
+#include <GraphMol/RDMol.h>
+#include <GraphMol/ROMol.h>
+#include <GraphMol/MolOps.h>
 #include <GraphMol/Fingerprints/FingerprintGenerator.h>
 #include <RDGeneral/hash/hash.hpp>
 #include <cstdint>
@@ -323,14 +326,19 @@ std::unique_ptr<FingerprintGenerator<std::uint64_t>> generatorFromJSON(
 template <typename OutputType>
 std::unique_ptr<SparseIntVect<OutputType>>
 FingerprintGenerator<OutputType>::getFingerprintHelper(
-    const ROMol &mol, FingerprintFuncArguments &args,
+    const RDMol &mol, FingerprintFuncArguments &args,
     const std::uint64_t fpSize) const {
-  const ROMol *lmol = &mol;
-  std::unique_ptr<ROMol> tmol;
+  const RDMol *lmol = &mol;
+  // The stereo-clone branch still uses the legacy ROMol-typed
+  // assignStereochemistry. When we port `MolOps::assignStereochemistry(RDMol&)`
+  // (legacy CIP / Pathway 1) this entire block can move native.
+  std::unique_ptr<ROMol> tmolROMol;
+  std::unique_ptr<RDMol> tmol;
   if (dp_fingerprintArguments->df_includeChirality &&
-      !mol.hasProp(common_properties::_StereochemDone)) {
-    tmol = std::unique_ptr<ROMol>(new ROMol(mol));
-    MolOps::assignStereochemistry(*tmol);
+      !mol.asROMol().hasProp(common_properties::_StereochemDone)) {
+    tmolROMol = std::unique_ptr<ROMol>(new ROMol(mol.asROMol()));
+    MolOps::assignStereochemistry(*tmolROMol);
+    tmol = std::unique_ptr<RDMol>(new RDMol(tmolROMol->asRDMol()));
     lmol = tmol.get();
   }
 
@@ -503,8 +511,15 @@ void setupTempAdditionalOutput(RDKit::FingerprintFuncArguments &args,
 template <typename OutputType>
 std::unique_ptr<SparseIntVect<OutputType>>
 FingerprintGenerator<OutputType>::getSparseCountFingerprint(
-    const ROMol &mol, FingerprintFuncArguments &args) const {
+    const RDMol &mol, FingerprintFuncArguments &args) const {
   return getFingerprintHelper(mol, args);
+}
+
+template <typename OutputType>
+std::unique_ptr<SparseIntVect<OutputType>>
+FingerprintGenerator<OutputType>::getSparseCountFingerprint(
+    const ROMol &mol, FingerprintFuncArguments &args) const {
+  return getSparseCountFingerprint(mol.asRDMol(), args);
 }
 
 // todo getSparseFingerprint does not completely produce the same output as
@@ -516,6 +531,13 @@ template <typename OutputType>
 std::unique_ptr<SparseBitVect>
 FingerprintGenerator<OutputType>::getSparseFingerprint(
     const ROMol &mol, FingerprintFuncArguments &args) const {
+  return getSparseFingerprint(mol.asRDMol(), args);
+}
+
+template <typename OutputType>
+std::unique_ptr<SparseBitVect>
+FingerprintGenerator<OutputType>::getSparseFingerprint(
+    const RDMol &mol, FingerprintFuncArguments &args) const {
   // make sure the result will fit into SparseBitVect
   std::uint32_t resultSize =
       std::min((std::uint64_t)std::numeric_limits<std::uint32_t>::max(),
@@ -576,6 +598,13 @@ template <typename OutputType>
 std::unique_ptr<SparseIntVect<std::uint32_t>>
 FingerprintGenerator<OutputType>::getCountFingerprint(
     const ROMol &mol, FingerprintFuncArguments &args) const {
+  return getCountFingerprint(mol.asRDMol(), args);
+}
+
+template <typename OutputType>
+std::unique_ptr<SparseIntVect<std::uint32_t>>
+FingerprintGenerator<OutputType>::getCountFingerprint(
+    const RDMol &mol, FingerprintFuncArguments &args) const {
   auto tempResult =
       getFingerprintHelper(mol, args, dp_fingerprintArguments->d_fpSize);
 
@@ -592,6 +621,13 @@ template <typename OutputType>
 std::unique_ptr<ExplicitBitVect>
 FingerprintGenerator<OutputType>::getFingerprint(
     const ROMol &mol, FingerprintFuncArguments &args) const {
+  return getFingerprint(mol.asRDMol(), args);
+}
+
+template <typename OutputType>
+std::unique_ptr<ExplicitBitVect>
+FingerprintGenerator<OutputType>::getFingerprint(
+    const RDMol &mol, FingerprintFuncArguments &args) const {
   std::uint32_t effectiveSize = dp_fingerprintArguments->d_fpSize;
   if (dp_fingerprintArguments->df_countSimulation) {
     if (dp_fingerprintArguments->d_countBounds.empty()) {

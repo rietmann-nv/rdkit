@@ -656,14 +656,20 @@ bool RAtomMatcher(const ROMol &mol, const Atom &atom,
 
 }  // namespace Matchers
 
-bool genericAtomMatcher(const ROMol &mol, const ROMol &query,
+bool genericAtomMatcher(const RDMol &mol, const RDMol &query,
                         const std::span<const unsigned int> &match) {
   boost::dynamic_bitset<> ignore(mol.getNumAtoms());
   for (const auto idx : match) {
     ignore.set(idx);
   }
 
-  for (const auto atom : query.atoms()) {
+  // The Matchers free functions still operate on (const ROMol&, const Atom&,
+  // bitset). Only the genericMatchers map values themselves need a port to be
+  // shim-free; the lookup keys live in atom properties accessible via either
+  // mol view, so we resolve the compat side once here.
+  const ROMol &molRO = mol.asROMol();
+  const ROMol &queryRO = query.asROMol();
+  for (const auto atom : queryRO.atoms()) {
     if (atom->getDegree() > 1) {
       continue;
     }
@@ -672,13 +678,19 @@ bool genericAtomMatcher(const ROMol &mol, const ROMol &query,
                                genericLabel)) {
       auto found = genericMatchers.find(genericLabel);
       if (found != genericMatchers.end() &&
-          !found->second(mol, *mol.getAtomWithIdx(match[atom->getIdx()]),
+          !found->second(molRO,
+                         *molRO.getAtomWithIdx(match[atom->getIdx()]),
                          ignore)) {
         return false;
       }
     }
   }
   return true;
+}
+
+bool genericAtomMatcher(const ROMol &mol, const ROMol &query,
+                        const std::span<const unsigned int> &match) {
+  return genericAtomMatcher(mol.asRDMol(), query.asRDMol(), match);
 }
 
 ROMol *adjustQueryPropertiesWithGenericGroups(

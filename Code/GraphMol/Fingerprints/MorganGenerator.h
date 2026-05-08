@@ -37,7 +37,7 @@ class RDKIT_FINGERPRINTS_EXPORT MorganAtomInvGenerator
   MorganAtomInvGenerator(const bool includeRingMembership = true);
 
   std::vector<std::uint32_t> *getAtomInvariants(
-      const ROMol &mol) const override;
+      const RDMol &mol) const override;
 
   std::string infoString() const override;
   void toJSON(boost::property_tree::ptree &pt) const override;
@@ -69,7 +69,7 @@ class RDKIT_FINGERPRINTS_EXPORT MorganFeatureAtomInvGenerator
   ~MorganFeatureAtomInvGenerator();
 
   std::vector<std::uint32_t> *getAtomInvariants(
-      const ROMol &mol) const override;
+      const RDMol &mol) const override;
 
   std::string infoString() const override;
   void toJSON(boost::property_tree::ptree &pt) const override;
@@ -99,7 +99,7 @@ class RDKIT_FINGERPRINTS_EXPORT MorganBondInvGenerator
                          const bool useChirality = false);
 
   std::vector<std::uint32_t> *getBondInvariants(
-      const ROMol &mol) const override;
+      const RDMol &mol) const override;
 
   std::string infoString() const override;
   void toJSON(boost::property_tree::ptree &pt) const override;
@@ -167,7 +167,7 @@ class RDKIT_FINGERPRINTS_EXPORT MorganAtomEnv
   const OutputType d_code;
   const unsigned int d_atomId;
   const unsigned int d_layer;
-  const ROMol *d_mol = nullptr;
+  const RDMol *d_mol = nullptr;
 
  public:
   OutputType getBitId(
@@ -189,7 +189,7 @@ class RDKIT_FINGERPRINTS_EXPORT MorganAtomEnv
    \param layer radius of this environment
    */
   MorganAtomEnv(const std::uint32_t code, const unsigned int atomId,
-                const unsigned int layer, const ROMol *mol)
+                const unsigned int layer, const RDMol *mol)
       : d_code(code), d_atomId(atomId), d_layer(layer), d_mol(mol) {}
 };
 
@@ -202,7 +202,7 @@ class RDKIT_FINGERPRINTS_EXPORT MorganEnvGenerator
     : public AtomEnvironmentGenerator<OutputType> {
  public:
   std::vector<AtomEnvironment<OutputType> *> getEnvironments(
-      const ROMol &mol, FingerprintArguments *arguments,
+      const RDMol &mol, FingerprintArguments *arguments,
       const std::vector<std::uint32_t> *fromAtoms,
       const std::vector<std::uint32_t> *ignoreAtoms, const int confId,
       const AdditionalOutput *additionalOutput,

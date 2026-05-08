@@ -78,7 +78,7 @@ class RDKIT_FINGERPRINTS_EXPORT TopologicalTorsionEnvGenerator
     : public AtomEnvironmentGenerator<OutputType> {
  public:
   std::vector<AtomEnvironment<OutputType> *> getEnvironments(
-      const ROMol &mol, FingerprintArguments *arguments,
+      const RDMol &mol, FingerprintArguments *arguments,
       const std::vector<std::uint32_t> *fromAtoms,
       const std::vector<std::uint32_t> *ignoreAtoms, const int confId,
       const AdditionalOutput *additionalOutput,

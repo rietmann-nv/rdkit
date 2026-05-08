@@ -109,6 +109,9 @@ RDKIT_FINGERPRINTS_EXPORT extern std::vector<std::string> defaultFeatureSmarts;
              a ring will be used in the invariant list.
 */
 RDKIT_FINGERPRINTS_EXPORT void getConnectivityInvariants(
+    const RDMol &mol, std::vector<std::uint32_t> &invars,
+    bool includeRingMembership = true);
+RDKIT_FINGERPRINTS_EXPORT void getConnectivityInvariants(
     const ROMol &mol, std::vector<std::uint32_t> &invars,
     bool includeRingMembership = true);
 const std::string morganConnectivityInvariantVersion = "1.0.0";
@@ -126,6 +129,9 @@ const std::string morganConnectivityInvariantVersion = "1.0.0";
   Acidic
 
 */
+RDKIT_FINGERPRINTS_EXPORT void getFeatureInvariants(
+    const RDMol &mol, std::vector<std::uint32_t> &invars,
+    const std::vector<const ROMol *> *patterns = nullptr);
 RDKIT_FINGERPRINTS_EXPORT void getFeatureInvariants(
     const ROMol &mol, std::vector<std::uint32_t> &invars,
     const std::vector<const ROMol *> *patterns = nullptr);

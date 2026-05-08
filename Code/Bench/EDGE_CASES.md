@@ -158,3 +158,136 @@ setAromaticity (when promoted)
 
 sanitizeMol (top-level)
   Always triggers; gap is the sum of the parts.
+
+SubstructMatch
+  Ported VF2 entry point + functors to native `RDMol&` and the
+  `SubstructMatchParameters` callback signatures to `(const RDMol&,
+  atomindex_t, const RDMol&, atomindex_t)`. Two acknowledged compat
+  bridges remain on cold paths (not exercised by the benches we add):
+
+    SMARTS query predicate trees (legacy `Atom*`-typed `Query<int, const
+    Atom*, true>`) are still wrapped via `NonCompatQuery` when the
+    matcher calls `mol.getAtomQuery(idx)->Match(ConstRDMolAtom{...})`.
+    Each `Match` therefore goes through one `asROMol().getAtomWithIdx`
+    bridge per evaluation. Eliminating this requires the SMARTS parser
+    to build native `Query<int, ConstRDMolAtom, true>` trees directly;
+    `RecursiveStructureQuery2` and the full `queryAtom*2` /
+    `makeAtom*Query2` factory set already exist on the `ConstRDMolAtom`
+    side, so this is a parser refactor, not a query-evaluator port.
+
+    `RecursiveStructureQuery::getQueryMol()` returns `ROMol const *`,
+    so the recursive matcher converts via `queryMol->asRDMol()` once
+    per nested SMARTS match. Same root cause as above.
+
+    `getMostSubstitutedCoreMatch` /
+    `sortMatchesByDegreeOfCoreSubstitution` /
+    `isAtomTerminalRGroupOrQueryHydrogen` retain ROMol entries; their
+    body uses `describeQuery` / `hasQuery` on the legacy query tree.
+    Native ports become straightforward once SMARTS produces
+    `ConstRDMolAtom` queries.
+
+  GenericGroups::genericAtomMatcher dispatches through the global
+  `genericMatchers` map whose values still take `(const ROMol&, const
+  Atom&, dynamic_bitset<>)`. The matcher's outer signature is RDMol
+  but it bridges once before per-atom dispatch. Porting the `Matchers`
+  free functions (`GroupAtomMatcher`, `AlkylAtomMatcher`, ...) is a
+  large mechanical sweep gated by SMARTS query parser changes too.
+
+CIPLabeler::assignCIPLabels (modern stereo, Pathway 2)
+  Used by `MorganBondInvGenerator` only when `useChirality=true` and
+  `Chirality::getUseLegacyStereoPerception() == false`. Morgan benches
+  added here run with `includeChirality=false`, so this branch is not
+  hot. Module is multi-file (`CIPMol`, `Node`, `Edge`, `Digraph`,
+  `Sort`, `Mancude`); port deferred.
+
+FingerprintGenerator::getFingerprintHelper
+  The `df_includeChirality && !_StereochemDone` branch clones the
+  molecule and calls `MolOps::assignStereochemistry` on the clone. The
+  legacy-CIP `assignStereochemistry(RDMol&)` path is the same Pathway 1
+  blocker (Canon ranking module port). Until that lands the helper
+  bridges via `mol.asROMol()`, then constructs an `RDMol` copy from
+  the resulting `ROMol`. With chirality off (default for the Morgan
+  benches added here) this branch is skipped entirely.
+
+Verified post-port performance baseline (Morgan radius=2, default sample set,
+Catch2 100-sample benchmark, on `rdmol_benchmarks` vs the
+`romol-benches-backport-20260507` reference branch):
+
+  - `master + benches` (no RDMol port, original Morgan body):  ~160 us
+  - `rdmol_benchmarks` ROMol leg (post-port, ROMol entry thunks
+    via `mol.asRDMol()` to native body):                       ~146 us
+  - `rdmol_benchmarks` RDMol leg (post-port, native entry):    ~142 us
+
+  Net improvement vs master: ~11% on the default Morgan path. The
+  small ROMol-vs-RDMol gap inside `rdmol_benchmarks` (~3%) reflects
+  that both legs now run identical native machine code post-port; the
+  only difference is the entry-point ref conversion.
+
+  An `asROMol()` call counter was instrumented temporarily and
+  confirmed zero compat-bridge calls on the Morgan path post-port.
+
+Legacy CIP via `MolOps::assignStereochemistry`
+  Calls into `Canon::chiralRankMolAtoms` / `Canon::rankMolAtoms`. Same
+  Canon-ranking blocker documented under `cleanUpOrganometallics`. Port
+  deferred until Canon ranking is migrated.
+
+Stress dataset coverage
+-----------------------
+
+The `Code/Bench/data/` directory holds 16 committed `.smi` datasets that
+exercise the inner branches catalogued above. Generators live in
+`Code/Bench/scripts/`; see `scripts/README.md` for regeneration.
+
+  size_00_20.smi / size_20_40.smi / size_40_60.smi / size_60_80.smi
+    100 mols each, bucketed by heavy-atom count. Used by every API bench
+    (mol/smiles/molops/stereo/descriptors/fingerprint/pickle/inchi/
+    substruct_match) to scan size scaling.
+
+  rings_2.smi ... rings_6.smi
+    100 mols each, exact SSSR ring count; heavy-atom cap 60 to separate
+    ring effects from size effects. Same plumbing matrix as size buckets.
+
+  radicals.smi
+    100 mols carrying at least one atom with `getNumRadicalElectrons() > 0`.
+    Targets the `assignRadicals` per-atom predicate hot path on inputs
+    where the predicate actually fires (the canonical set's hit rate is
+    incidental). Plumbed through `MolOps::assignRadicals (+RDMol)`.
+
+  organometallics.smi
+    100 mols containing transition metals (cisplatin, ferrocene, EDTA-Ca,
+    [Pd(NH3)4]^2+, Grignards, hexacarbonyls, ...) plus the CPLX_*.mol
+    fixtures and metal-bearing NCI entries. Targets the
+    `cleanUpOrganometallics` outer loop AND the inner hypervalent-non-metal
+    branch documented above. Plumbed through `cleanUp (+RDMol)` and
+    `assignRadicals (+RDMol)`.
+
+  hypervalent_halogens.smi
+    100 mols of `Cl(=O)(=O)O[R]`, `Br(=O)O[R]`, `I(=O)(=O)(=O)O[R]` and
+    similar (perchlorate / perbromate / periodate cores with O-substituents
+    that keep the halogen at valence 7). Targets the `halogenCleanup`
+    branch in `cleanUp`. Plumbed through `cleanUp (+RDMol)`.
+
+  hypervalent_p.smi
+    100 mols of `[R]C=P(=O)R'` decorated with various carbon scaffolds.
+    Targets the `phosphorusCleanup` branch in `cleanUp` (P, valence 5,
+    degree 3, one =O, one =C/N). Plumbed through `cleanUp (+RDMol)`.
+
+  pre_canonical_no2_azide.smi
+    100 mols with literal `N(=O)=O` / `N=N#N` substituents (pre-cleanup
+    forms of nitro and azide). Targets the `nitrogensCleanup` NO2 + azide
+    branches. Plumbed through `cleanUp (+RDMol)` and the SMILES no-sanitize
+    parse path.
+
+  atropisomers.smi
+    92 mols extracted from `Code/GraphMol/FileParsers/test_data/
+    atropisomers/*.sdf`, written as CXSMILES with atrop wedge markers
+    preserved. Targets the wedge-bond tracking paths in the SMILES parser/
+    writer and `findPotentialStereo` / `assignStereochemistry`. The
+    `cleanupAtropisomers` and `Atropisomers::cleanupAtropisomerStereoGroups`
+    benches will be added when those ports land (see "Future ports" above).
+
+  kekulize_hard.smi
+    100 fused-aromatic systems (acenes 4-7, pyrene/coronene, porphyrin,
+    indolocarbazole, polyphenazine, multi-NH-rich fused 5/6 systems) that
+    expose the kekulizer's branching factor. Plumbed through
+    `MolOps::Kekulize (+RDMol)` and the SMILES round-trip benches.

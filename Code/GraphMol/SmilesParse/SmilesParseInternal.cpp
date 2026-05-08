@@ -628,6 +628,9 @@ bool parseSmiles(const char* text, RDMol &mol, SmilesParseTemp& temp) {
       if (isAromatic0 == isAromatic1) {
         // Both atoms aromatic or not
         bond.setBondType(isAromatic0 ? BondType::AROMATIC : BondType::SINGLE);
+        if (isAromatic0) {
+          bond.setIsAromatic(true);
+        }
       } else {
 #if 0
         const bool isUnknown0 = (atoms[atom0].getAtomicNum() == 0);

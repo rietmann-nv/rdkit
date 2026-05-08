@@ -1940,70 +1940,12 @@ int symmetrizeSSSR(RDMol &mol, bool includeDativeBonds,
   return rdcast<int>(mol.getRingInfo().numRings());
 }
 
-namespace {
-void _DFS(const ROMol &mol, const Atom *atom, INT_VECT &atomColors,
-          std::vector<const Atom *> &traversalOrder, VECT_INT_VECT &res,
-          const Atom *fromAtom = nullptr) {
-  PRECONDITION(atom, "bad atom");
-  PRECONDITION(atomColors[atom->getIdx()] == 0, "bad color");
-  atomColors[atom->getIdx()] = 1;
-  traversalOrder.push_back(atom);
-
-  for (const auto nbr : mol.atomNeighbors(atom)) {
-    unsigned int nbrIdx = nbr->getIdx();
-    if (atomColors[nbrIdx] == 0) {
-      if (nbr->getDegree() < 2) {
-        atomColors[nbr->getIdx()] = 2;
-      } else {
-        _DFS(mol, nbr, atomColors, traversalOrder, res, atom);
-      }
-    } else if (atomColors[nbrIdx] == 1) {
-      if (fromAtom && nbrIdx != fromAtom->getIdx()) {
-        INT_VECT cycle;
-        auto lastElem =
-            std::find(traversalOrder.rbegin(), traversalOrder.rend(), atom);
-        for (auto rIt = lastElem;  // traversalOrder.rbegin();
-             rIt != traversalOrder.rend() && (*rIt)->getIdx() != nbrIdx;
-             ++rIt) {
-          cycle.push_back((*rIt)->getIdx());
-        }
-        cycle.push_back(nbrIdx);
-        res.push_back(cycle);
-      }
-    }
-  }
-  atomColors[atom->getIdx()] = 2;
-  traversalOrder.pop_back();
-}
-}  // end of anonymous namespace
 void fastFindRings(const ROMol &mol) {
-  // FIXME: Replace this with call to non-compatibility function, using const_cast
-  if (mol.getRingInfo()->isInitialized()) {
-    mol.getRingInfo()->reset();
-  }
-
-  mol.getRingInfo()->initialize(FIND_RING_TYPE_FAST);
-
-  VECT_INT_VECT res;
-  res.resize(0);
-
-  unsigned int nats = mol.getNumAtoms();
-
-  INT_VECT atomColors(nats, 0);
-
-  for (unsigned int i = 0; i < nats; ++i) {
-    if (atomColors[i]) {
-      continue;
-    }
-    if (mol.getAtomWithIdx(i)->getDegree() < 2) {
-      atomColors[i] = 2;
-      continue;
-    }
-    std::vector<const Atom *> traversalOrder;
-    _DFS(mol, mol.getAtomWithIdx(i), atomColors, traversalOrder, res);
-  }
-
-  FindRings::storeRingsInfo(mol, res);
+  // The const_cast must precede getRingInfo() so the compatibility sync
+  // status for the ring info is set correctly; matches the findSSSR(ROMol)
+  // pattern.
+  fastFindRings(mol.asRDMol(),
+                const_cast<ROMol &>(mol).asRDMol().getRingInfo());
 }
 
 void fastFindRings(const RDMol &mol, RingInfoCache& rings) {

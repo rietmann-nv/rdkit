@@ -20,6 +20,8 @@
 
 #include <vector>
 
+#include <GraphMol/details.h>
+
 namespace RDKit {
 class Atom;
 class Bond;
@@ -72,6 +74,12 @@ class RDKIT_GRAPHMOL_EXPORT StereoGroup {
   StereoGroupType getGroupType() const;
   const std::vector<Atom *> &getAtoms() const;
   const std::vector<Bond *> &getBonds() const;
+
+  //! Indexed views of the atoms/bonds in the group, suitable for code that
+  //! consumes RDMol (AtomData/BondData) flat storage rather than ROMol
+  //! pointers.
+  std::vector<atomindex_t> getAtomIndices() const;
+  std::vector<atomindex_t> getBondIndices() const;
 
   unsigned getReadId() const { return d_readId; }
   unsigned getWriteId() const { return d_writeId; }

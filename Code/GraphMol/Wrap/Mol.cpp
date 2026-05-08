@@ -163,8 +163,11 @@ void setExtraAtomCheckFunc(SubstructMatchParameters &ps, python::object func) {
 }
 void setExtraAtomCheckFunc2(SubstructMatchParameters &ps,
                             const AtomCoordsMatchFunctor &ftor) {
-  ps.extraAtomCheck = std::bind(&AtomCoordsMatchFunctor::operator(), &ftor,
-                                std::placeholders::_1, std::placeholders::_2);
+  ps.extraAtomCheck = [&ftor](const RDMol &qmol, atomindex_t qIdx,
+                              const RDMol &mmol, atomindex_t mIdx) {
+    return ftor(*qmol.asROMol().getAtomWithIdx(qIdx),
+                *mmol.asROMol().getAtomWithIdx(mIdx));
+  };
 }
 void setExtraBondCheckFunc(SubstructMatchParameters &ps, python::object func) {
   ps.extraBondCheck = pyMatchFunctor<Bond>(func);
@@ -304,7 +307,10 @@ struct mol_wrapper {
             (python::arg("self"), python::arg("refConfId") = -1,
              python::arg("queryConfId") = -1, python::arg("tol") = 1e-4),
             "constructor taking reference and query conformer IDs and a distance tolerance"))
-        .def("__call__", &RDKit::AtomCoordsMatchFunctor::operator())
+        .def("__call__",
+             static_cast<bool (RDKit::AtomCoordsMatchFunctor::*)(
+                 const RDKit::Atom &, const RDKit::Atom &) const>(
+                 &RDKit::AtomCoordsMatchFunctor::operator()))
         .def_readwrite("refConfId", &RDKit::AtomCoordsMatchFunctor::d_refConfId,
                        "reference conformer ID")
         .def_readwrite("queryConfId",

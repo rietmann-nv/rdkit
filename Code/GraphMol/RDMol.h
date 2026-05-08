@@ -1099,6 +1099,83 @@ class RDKIT_GRAPHMOL_EXPORT RDMol {
   ~RDMol();
   void clear();
 
+  //! Returns the molecule itself; provided for parity with ROMol::getTopology()
+  //! so VF2 / Boost-graph-style algorithms can use a single accessor.
+  const RDMol &getTopology() const { return *this; }
+
+  // Boost-graph descriptor / iterator concept aliases used by the substruct
+  // VF2 implementation. ROMol has equivalents around its CSR helper classes
+  // and RDMol shares the same wire format, so we declare matching trivial
+  // wrappers here without a header dependency on ROMol.h.
+  using vertex_descriptor = std::size_t;
+  class edge_descriptor {
+    uint32_t index;
+
+   public:
+    edge_descriptor() : index(uint32_t(-1)) {}
+    explicit edge_descriptor(uint32_t i) : index(i) {}
+    bool operator==(const edge_descriptor &that) const {
+      return index == that.index;
+    }
+    bool operator!=(const edge_descriptor &that) const {
+      return index != that.index;
+    }
+    uint32_t operator*() const { return index; }
+    edge_descriptor &operator++() {
+      ++index;
+      return *this;
+    }
+  };
+  class vertex_iterator {
+    vertex_descriptor i;
+
+   public:
+    vertex_iterator() : i(std::size_t(-1)) {}
+    explicit vertex_iterator(vertex_descriptor index) : i(index) {}
+    bool operator==(const vertex_iterator &that) const { return i == that.i; }
+    bool operator!=(const vertex_iterator &that) const { return i != that.i; }
+    vertex_descriptor operator*() const { return i; }
+    vertex_iterator &operator++() {
+      ++i;
+      return *this;
+    }
+  };
+  class adjacency_iterator {
+    const uint32_t *p;
+
+   public:
+    adjacency_iterator() : p(nullptr) {}
+    explicit adjacency_iterator(const uint32_t *neighbors) : p(neighbors) {}
+    bool operator==(const adjacency_iterator &that) const {
+      return p == that.p;
+    }
+    bool operator!=(const adjacency_iterator &that) const {
+      return p != that.p;
+    }
+    bool operator<(const adjacency_iterator &that) const {
+      return p < that.p;
+    }
+    vertex_descriptor operator*() const { return vertex_descriptor{*p}; }
+    adjacency_iterator &operator++() {
+      ++p;
+      return *this;
+    }
+  };
+  class out_edge_iterator {
+    const uint32_t *p;
+
+   public:
+    out_edge_iterator() : p(nullptr) {}
+    explicit out_edge_iterator(const uint32_t *edges) : p(edges) {}
+    bool operator==(const out_edge_iterator &that) const { return p == that.p; }
+    bool operator!=(const out_edge_iterator &that) const { return p != that.p; }
+    edge_descriptor operator*() const { return edge_descriptor{*p}; }
+    out_edge_iterator &operator++() {
+      ++p;
+      return *this;
+    }
+  };
+
   // Returns the number of explicit atoms
   uint32_t getNumAtoms() const { return uint32_t(atomData.size()); }
   uint32_t getNumAtoms(bool onlyExplicit) const {
