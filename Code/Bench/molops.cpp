@@ -34,6 +34,79 @@ auto run_per_sample(const std::vector<Mol> &samples,
   });
 }
 
+// Sanitize step index.  Each bench primes its input by running steps
+// [cleanUp .. (stage-1)] on raw parser output; the target stage then runs
+// on input in the same state it would see inside sanitizeMol.
+enum class SanitizeStage {
+  cleanUp = 0,                  // no priming
+  cleanUpOrganometallics,        // after cleanUp
+  updatePropertyCache_first,     // after cleanUpOrganometallics
+  symmetrizeSSSR,                // after updatePropertyCache(1)
+  Kekulize,                      // after symmetrizeSSSR
+  assignRadicals,                // after Kekulize
+  setAromaticity,                // after assignRadicals
+  setConjugation,                // after setAromaticity
+  setHybridization,              // after setConjugation
+  cleanupAtropisomers,           // after setHybridization
+  cleanupChirality,              // after cleanupAtropisomers
+  adjustHs,                      // after cleanupChirality
+};
+
+template <class Mol>
+void prime_to(Mol &mol, SanitizeStage stage) {
+  using S = SanitizeStage;
+  if (stage <= S::cleanUp) return;
+  MolOps::cleanUp(mol);
+  if (stage <= S::cleanUpOrganometallics) return;
+  MolOps::cleanUpOrganometallics(mol);
+  if (stage <= S::updatePropertyCache_first) return;
+  mol.updatePropertyCache(true);
+  if (stage <= S::symmetrizeSSSR) return;
+  (void)MolOps::symmetrizeSSSR(mol);
+  if (stage <= S::Kekulize) return;
+  MolOps::Kekulize(mol, /*markAtomsBonds=*/true, /*canonical=*/false);
+  if (stage <= S::assignRadicals) return;
+  MolOps::assignRadicals(mol);
+  if (stage <= S::setAromaticity) return;
+  (void)MolOps::setAromaticity(mol);
+  if (stage <= S::setConjugation) return;
+  MolOps::setConjugation(mol);
+  if (stage <= S::setHybridization) return;
+  MolOps::setHybridization(mol);
+  if (stage <= S::cleanupAtropisomers) return;
+  MolOps::cleanupAtropisomers(mol);
+  if (stage <= S::cleanupChirality) return;
+  MolOps::cleanupChirality(mol);
+  if (stage <= S::adjustHs) return;
+  MolOps::adjustHs(mol);
+}
+
+template <class Sample, class Mol>
+std::vector<Mol> load_and_prime(Dataset dataset, SanitizeStage stage);
+
+template <>
+std::vector<RWMol> load_and_prime<RWMol, RWMol>(Dataset dataset,
+                                                 SanitizeStage stage) {
+  auto romol_samples = bench_common::load_samples(dataset, /*sanitize=*/false);
+  std::vector<RWMol> primed;
+  primed.reserve(romol_samples.size());
+  for (auto &mol : romol_samples) {
+    primed.emplace_back(mol);
+    prime_to(primed.back(), stage);
+  }
+  return primed;
+}
+
+template <>
+std::vector<RDMol> load_and_prime<RDMol, RDMol>(Dataset dataset,
+                                                 SanitizeStage stage) {
+  auto samples = bench_common::load_rdmol_samples(dataset, /*sanitize=*/false);
+  for (auto &mol : samples) {
+    prime_to(mol, stage);
+  }
+  return samples;
+}
+
 }  // namespace
 
 TEST_CASE("MolOps::addHs", "[molops]") {
@@ -87,175 +160,74 @@ TEST_CASE("MolOps::getMolFrags", "[molops]") {
   };
 }
 
-TEST_CASE("MolOps::setConjugation", "[molops]") {
-  auto samples = bench_common::load_samples();
-  BENCHMARK_ADVANCED("MolOps::setConjugation")(
-      Catch::Benchmark::Chronometer meter) {
-    run_per_sample(samples, meter, [](ROMol &mol) {
-      MolOps::setConjugation(mol);
-      return mol.getNumBonds();
-    });
-  };
-}
+// Unified sub-step bench: load raw parser output, prime to STAGE, then
+// measure OP on input that matches what sanitizeMol's caller would see at
+// that point.
+#define BENCH_STAGE(NAME, STAGE, OP_RO, OP_RD, COUNT, DATASET, SUFFIX, TAG)    \
+  TEST_CASE("MolOps::" NAME " " SUFFIX, "[molops]" TAG) {                       \
+    auto rw_samples = load_and_prime<RWMol, RWMol>(DATASET, STAGE);             \
+    BENCHMARK_ADVANCED("MolOps::" NAME " " SUFFIX)(                             \
+        Catch::Benchmark::Chronometer meter) {                                  \
+      run_per_sample(rw_samples, meter, [](RWMol &mol) {                        \
+        OP_RO;                                                                  \
+        return COUNT;                                                           \
+      });                                                                       \
+    };                                                                          \
+  }                                                                             \
+  TEST_CASE("MolOps::" NAME " RDMol " SUFFIX, "[molops][rdmol]" TAG) {          \
+    auto samples = load_and_prime<RDMol, RDMol>(DATASET, STAGE);                \
+    BENCHMARK_ADVANCED("MolOps::" NAME " RDMol " SUFFIX)(                       \
+        Catch::Benchmark::Chronometer meter) {                                  \
+      run_per_sample(samples, meter, [](RDMol &mol) {                           \
+        OP_RD;                                                                  \
+        return COUNT;                                                           \
+      });                                                                       \
+    };                                                                          \
+  }
 
-TEST_CASE("MolOps::setConjugation RDMol", "[molops][rdmol]") {
-  auto samples = bench_common::load_rdmol_samples();
-  BENCHMARK_ADVANCED("MolOps::setConjugation RDMol")(
-      Catch::Benchmark::Chronometer meter) {
-    run_per_sample(samples, meter, [](RDMol &mol) {
-      MolOps::setConjugation(mol);
-      return mol.getNumBonds();
-    });
-  };
-}
-
-TEST_CASE("MolOps::setHybridization", "[molops]") {
-  auto samples = bench_common::load_samples();
-  BENCHMARK_ADVANCED("MolOps::setHybridization")(
-      Catch::Benchmark::Chronometer meter) {
-    run_per_sample(samples, meter, [](ROMol &mol) {
-      MolOps::setHybridization(mol);
-      return mol.getNumAtoms();
-    });
-  };
-}
-
-TEST_CASE("MolOps::setHybridization RDMol", "[molops][rdmol]") {
-  auto samples = bench_common::load_rdmol_samples();
-  BENCHMARK_ADVANCED("MolOps::setHybridization RDMol")(
-      Catch::Benchmark::Chronometer meter) {
-    run_per_sample(samples, meter, [](RDMol &mol) {
-      MolOps::setHybridization(mol);
-      return mol.getNumAtoms();
-    });
-  };
-}
-
-TEST_CASE("MolOps::adjustHs", "[molops]") {
-  auto samples = bench_common::load_samples();
-  BENCHMARK_ADVANCED("MolOps::adjustHs")(
-      Catch::Benchmark::Chronometer meter) {
-    std::vector<RWMol> rw_samples;
-    rw_samples.reserve(samples.size());
-    for (auto &mol : samples) {
-      rw_samples.emplace_back(mol);
-    }
-    run_per_sample(rw_samples, meter, [](RWMol &mol) {
-      MolOps::adjustHs(mol);
-      return mol.getNumAtoms();
-    });
-  };
-}
-
-TEST_CASE("MolOps::adjustHs RDMol", "[molops][rdmol]") {
-  auto samples = bench_common::load_rdmol_samples();
-  BENCHMARK_ADVANCED("MolOps::adjustHs RDMol")(
-      Catch::Benchmark::Chronometer meter) {
-    run_per_sample(samples, meter, [](RDMol &mol) {
-      MolOps::adjustHs(mol);
-      return mol.getNumAtoms();
-    });
-  };
-}
-
-TEST_CASE("MolOps::assignRadicals", "[molops]") {
-  auto samples = bench_common::load_samples();
-  BENCHMARK_ADVANCED("MolOps::assignRadicals")(
-      Catch::Benchmark::Chronometer meter) {
-    std::vector<RWMol> rw_samples;
-    rw_samples.reserve(samples.size());
-    for (auto &mol : samples) {
-      rw_samples.emplace_back(mol);
-    }
-    run_per_sample(rw_samples, meter, [](RWMol &mol) {
-      MolOps::assignRadicals(mol);
-      return mol.getNumAtoms();
-    });
-  };
-}
-
-TEST_CASE("MolOps::assignRadicals RDMol", "[molops][rdmol]") {
-  auto samples = bench_common::load_rdmol_samples();
-  BENCHMARK_ADVANCED("MolOps::assignRadicals RDMol")(
-      Catch::Benchmark::Chronometer meter) {
-    run_per_sample(samples, meter, [](RDMol &mol) {
-      MolOps::assignRadicals(mol);
-      return mol.getNumAtoms();
-    });
-  };
-}
-
-TEST_CASE("MolOps::cleanUp", "[molops]") {
-  auto samples = bench_common::load_samples();
-  BENCHMARK_ADVANCED("MolOps::cleanUp")(
-      Catch::Benchmark::Chronometer meter) {
-    std::vector<RWMol> rw_samples;
-    rw_samples.reserve(samples.size());
-    for (auto &mol : samples) {
-      rw_samples.emplace_back(mol);
-    }
-    run_per_sample(rw_samples, meter, [](RWMol &mol) {
-      MolOps::cleanUp(mol);
-      return mol.getNumAtoms();
-    });
-  };
-}
-
-TEST_CASE("MolOps::cleanUp RDMol", "[molops][rdmol]") {
-  auto samples = bench_common::load_rdmol_samples();
-  BENCHMARK_ADVANCED("MolOps::cleanUp RDMol")(
-      Catch::Benchmark::Chronometer meter) {
-    run_per_sample(samples, meter, [](RDMol &mol) {
-      MolOps::cleanUp(mol);
-      return mol.getNumAtoms();
-    });
-  };
-}
-
-TEST_CASE("MolOps::cleanupChirality", "[molops]") {
-  auto samples = bench_common::load_samples();
-  BENCHMARK_ADVANCED("MolOps::cleanupChirality")(
-      Catch::Benchmark::Chronometer meter) {
-    std::vector<RWMol> rw_samples;
-    rw_samples.reserve(samples.size());
-    for (auto &mol : samples) {
-      rw_samples.emplace_back(mol);
-    }
-    run_per_sample(rw_samples, meter, [](RWMol &mol) {
-      MolOps::cleanupChirality(mol);
-      return mol.getNumAtoms();
-    });
-  };
-}
-
-TEST_CASE("MolOps::Kekulize", "[molops]") {
-  auto samples = bench_common::load_samples();
-  BENCHMARK_ADVANCED("MolOps::Kekulize")(
-      Catch::Benchmark::Chronometer meter) {
-    std::vector<RWMol> rw_samples;
-    rw_samples.reserve(samples.size());
-    for (auto &mol : samples) {
-      rw_samples.emplace_back(mol);
-    }
-    run_per_sample(rw_samples, meter, [](RWMol &mol) {
-      MolOps::Kekulize(mol, /*markAtomsBonds=*/true,
-                       /*canonical=*/false);
-      return mol.getNumBonds();
-    });
-  };
-}
-
-TEST_CASE("MolOps::Kekulize RDMol", "[molops][rdmol]") {
-  auto samples = bench_common::load_rdmol_samples();
-  BENCHMARK_ADVANCED("MolOps::Kekulize RDMol")(
-      Catch::Benchmark::Chronometer meter) {
-    run_per_sample(samples, meter, [](RDMol &mol) {
-      MolOps::Kekulize(mol, /*markAtomsBonds=*/true,
-                       /*canonical=*/false);
-      return mol.getNumBonds();
-    });
-  };
-}
+// Canonical (default sample set) sub-step benches with proper priming.
+BENCH_STAGE("cleanUp", SanitizeStage::cleanUp, MolOps::cleanUp(mol),
+            MolOps::cleanUp(mol), mol.getNumAtoms(), Dataset::Canonical, "",
+            "[canonical]")
+BENCH_STAGE("cleanUpOrganometallics", SanitizeStage::cleanUpOrganometallics,
+            MolOps::cleanUpOrganometallics(mol),
+            MolOps::cleanUpOrganometallics(mol), mol.getNumAtoms(),
+            Dataset::Canonical, "", "[canonical]")
+BENCH_STAGE("updatePropertyCache_first",
+            SanitizeStage::updatePropertyCache_first,
+            mol.updatePropertyCache(true), mol.updatePropertyCache(true),
+            mol.getNumAtoms(), Dataset::Canonical, "", "[canonical]")
+BENCH_STAGE("symmetrizeSSSR", SanitizeStage::symmetrizeSSSR,
+            (void)MolOps::symmetrizeSSSR(mol),
+            (void)MolOps::symmetrizeSSSR(mol), mol.getNumAtoms(),
+            Dataset::Canonical, "", "[canonical]")
+BENCH_STAGE("Kekulize", SanitizeStage::Kekulize,
+            MolOps::Kekulize(mol, true, false),
+            MolOps::Kekulize(mol, true, false), mol.getNumBonds(),
+            Dataset::Canonical, "", "[canonical]")
+BENCH_STAGE("assignRadicals", SanitizeStage::assignRadicals,
+            MolOps::assignRadicals(mol), MolOps::assignRadicals(mol),
+            mol.getNumAtoms(), Dataset::Canonical, "", "[canonical]")
+BENCH_STAGE("setAromaticity", SanitizeStage::setAromaticity,
+            (void)MolOps::setAromaticity(mol),
+            (void)MolOps::setAromaticity(mol), mol.getNumAtoms(),
+            Dataset::Canonical, "", "[canonical]")
+BENCH_STAGE("setConjugation", SanitizeStage::setConjugation,
+            MolOps::setConjugation(mol), MolOps::setConjugation(mol),
+            mol.getNumBonds(), Dataset::Canonical, "", "[canonical]")
+BENCH_STAGE("setHybridization", SanitizeStage::setHybridization,
+            MolOps::setHybridization(mol), MolOps::setHybridization(mol),
+            mol.getNumAtoms(), Dataset::Canonical, "", "[canonical]")
+BENCH_STAGE("cleanupAtropisomers", SanitizeStage::cleanupAtropisomers,
+            MolOps::cleanupAtropisomers(mol),
+            MolOps::cleanupAtropisomers(mol), mol.getNumAtoms(),
+            Dataset::Canonical, "", "[canonical]")
+BENCH_STAGE("cleanupChirality", SanitizeStage::cleanupChirality,
+            MolOps::cleanupChirality(mol), MolOps::cleanupChirality(mol),
+            mol.getNumAtoms(), Dataset::Canonical, "", "[canonical]")
+BENCH_STAGE("adjustHs", SanitizeStage::adjustHs, MolOps::adjustHs(mol),
+            MolOps::adjustHs(mol), mol.getNumAtoms(), Dataset::Canonical, "",
+            "[canonical]")
 
 TEST_CASE("MolOps::removeHs", "[molops]") {
   auto baseSamples = bench_common::load_samples();
@@ -308,6 +280,133 @@ TEST_CASE("MolOps::cleanupChirality RDMol", "[molops][rdmol]") {
     });
   };
 }
+
+// ---------------------------------------------------------------------------
+// Umbrella sanitize / removeHs benches.  These reflect what SmilesToMol
+// actually calls on the default parse path (removeHs(mol, ps, temp,
+// sanitize=true) which internally invokes sanitizeMol).  The standalone
+// sub-step benches above are not additive with the umbrella benches: they
+// measure the same code paths in isolation, but in real pipeline use they
+// run inside sanitizeMol.
+
+namespace {
+
+std::vector<RDMol> load_unsanitized_rdmol_samples(Dataset dataset) {
+  auto samples = bench_common::load_rdmol_samples(dataset, /*sanitize=*/false);
+  // For the umbrella sanitize/removeHs bench we want an input shape that
+  // matches what SmilesToMol passes to removeHs/sanitizeMol on the default
+  // path -- i.e. fresh parser output, no sanitize done yet.
+  return samples;
+}
+
+std::vector<ROMol> load_unsanitized_romol_samples(Dataset dataset) {
+  return bench_common::load_samples(dataset, /*sanitize=*/false);
+}
+
+}  // namespace
+
+TEST_CASE("MolOps::sanitizeMol", "[molops]") {
+  auto samples = load_unsanitized_romol_samples(Dataset::Canonical);
+  std::vector<RWMol> rw_samples;
+  rw_samples.reserve(samples.size());
+  for (auto &mol : samples) {
+    rw_samples.emplace_back(mol);
+  }
+  BENCHMARK_ADVANCED("MolOps::sanitizeMol")(
+      Catch::Benchmark::Chronometer meter) {
+    run_per_sample(rw_samples, meter, [](RWMol &mol) {
+      MolOps::sanitizeMol(mol);
+      return mol.getNumAtoms();
+    });
+  };
+}
+
+TEST_CASE("MolOps::sanitizeMol RDMol", "[molops][rdmol]") {
+  auto samples = load_unsanitized_rdmol_samples(Dataset::Canonical);
+  BENCHMARK_ADVANCED("MolOps::sanitizeMol RDMol")(
+      Catch::Benchmark::Chronometer meter) {
+    run_per_sample(samples, meter, [](RDMol &mol) {
+      MolOps::sanitizeMol(mol);
+      return mol.getNumAtoms();
+    });
+  };
+}
+
+#define BENCH_SANITIZE(DATASET, SUFFIX, TAG)                                   \
+  TEST_CASE("MolOps::sanitizeMol " SUFFIX, "[molops]" TAG) {                    \
+    auto samples = load_unsanitized_romol_samples(DATASET);                     \
+    std::vector<RWMol> rw_samples;                                              \
+    rw_samples.reserve(samples.size());                                         \
+    for (auto &mol : samples) {                                                 \
+      rw_samples.emplace_back(mol);                                             \
+    }                                                                           \
+    BENCHMARK_ADVANCED("MolOps::sanitizeMol " SUFFIX)(                          \
+        Catch::Benchmark::Chronometer meter) {                                  \
+      run_per_sample(rw_samples, meter, [](RWMol &mol) {                        \
+        MolOps::sanitizeMol(mol);                                               \
+        return mol.getNumAtoms();                                               \
+      });                                                                       \
+    };                                                                          \
+  }                                                                             \
+  TEST_CASE("MolOps::sanitizeMol RDMol " SUFFIX, "[molops][rdmol]" TAG) {       \
+    auto samples = load_unsanitized_rdmol_samples(DATASET);                     \
+    BENCHMARK_ADVANCED("MolOps::sanitizeMol RDMol " SUFFIX)(                    \
+        Catch::Benchmark::Chronometer meter) {                                  \
+      run_per_sample(samples, meter, [](RDMol &mol) {                           \
+        MolOps::sanitizeMol(mol);                                               \
+        return mol.getNumAtoms();                                               \
+      });                                                                       \
+    };                                                                          \
+  }
+
+BENCH_SANITIZE(Dataset::Size_00_20, "size 00-20", "[size_00_20]")
+BENCH_SANITIZE(Dataset::Size_20_40, "size 20-40", "[size_20_40]")
+BENCH_SANITIZE(Dataset::Size_40_60, "size 40-60", "[size_40_60]")
+BENCH_SANITIZE(Dataset::Size_60_80, "size 60-80", "[size_60_80]")
+BENCH_SANITIZE(Dataset::Rings_4, "rings 4", "[rings_4]")
+BENCH_SANITIZE(Dataset::KekulizeHard, "kekulize_hard", "[kekulize_hard]")
+
+// removeHs core (sanitize=false): the H-removal pass without the recursive
+// sanitizeMol that SmilesToMol's default path triggers.  This is what runs
+// in the pipeline BEFORE sanitize is invoked.
+
+#define BENCH_REMOVEHS_CORE(DATASET, SUFFIX, TAG)                              \
+  TEST_CASE("MolOps::removeHs core " SUFFIX, "[molops]" TAG) {                  \
+    auto romol_samples = load_unsanitized_romol_samples(DATASET);               \
+    std::vector<RWMol> rw_samples;                                              \
+    rw_samples.reserve(romol_samples.size());                                   \
+    for (auto &mol : romol_samples) {                                           \
+      rw_samples.emplace_back(mol);                                             \
+    }                                                                           \
+    MolOps::RemoveHsParameters ps;                                              \
+    BENCHMARK_ADVANCED("MolOps::removeHs core " SUFFIX)(                        \
+        Catch::Benchmark::Chronometer meter) {                                  \
+      run_per_sample(rw_samples, meter, [&ps](RWMol &mol) {                     \
+        MolOps::removeHs(mol, ps, /*sanitize=*/false);                          \
+        return mol.getNumAtoms();                                               \
+      });                                                                       \
+    };                                                                          \
+  }                                                                             \
+  TEST_CASE("MolOps::removeHs core RDMol " SUFFIX, "[molops][rdmol]" TAG) {     \
+    auto samples = load_unsanitized_rdmol_samples(DATASET);                     \
+    MolOps::RemoveHsParameters ps;                                              \
+    BENCHMARK_ADVANCED("MolOps::removeHs core RDMol " SUFFIX)(                  \
+        Catch::Benchmark::Chronometer meter) {                                  \
+      MolOps::SanitizeTemp temp;                                                \
+      run_per_sample(samples, meter, [&ps, &temp](RDMol &mol) {                 \
+        MolOps::removeHs(mol, ps, temp, /*sanitize=*/false);                    \
+        return mol.getNumAtoms();                                               \
+      });                                                                       \
+    };                                                                          \
+  }
+
+BENCH_REMOVEHS_CORE(Dataset::Canonical, "", "[canonical]")
+BENCH_REMOVEHS_CORE(Dataset::Size_00_20, "size 00-20", "[size_00_20]")
+BENCH_REMOVEHS_CORE(Dataset::Size_20_40, "size 20-40", "[size_20_40]")
+BENCH_REMOVEHS_CORE(Dataset::Size_40_60, "size 40-60", "[size_40_60]")
+BENCH_REMOVEHS_CORE(Dataset::Size_60_80, "size 60-80", "[size_60_80]")
+BENCH_REMOVEHS_CORE(Dataset::Rings_4, "rings 4", "[rings_4]")
+BENCH_REMOVEHS_CORE(Dataset::KekulizeHard, "kekulize_hard", "[kekulize_hard]")
 
 // ---------------------------------------------------------------------------
 // Per-bucket size + ring-count variants. Each existing benchmark above gets a
@@ -421,35 +520,14 @@ TEST_CASE("MolOps::cleanupChirality RDMol", "[molops][rdmol]") {
     };                                                                         \
   }
 
+// Per-bucket variants for non-sub-step utilities (addHs / FindSSR /
+// getMolFrags) only. Sub-step benches (cleanUp, Kekulize, etc.) come from
+// BENCH_STAGE_FOR_BUCKETS below, which primes inputs to the correct state.
 #define BENCH_OPS_FOR(DATASET, SUFFIX, TAG)                                    \
   BENCH_ADDHS(DATASET, SUFFIX, TAG)                                            \
   BENCH_FINDSSR(DATASET, SUFFIX, TAG)                                          \
   BENCH_FINDSSR_RD(DATASET, SUFFIX, TAG)                                       \
-  BENCH_GETMOLFRAGS(DATASET, SUFFIX, TAG)                                      \
-  BENCH_RO_ADV("setConjugation", MolOps::setConjugation(mol),                  \
-               mol.getNumBonds(), DATASET, SUFFIX, TAG)                        \
-  BENCH_RD_ADV("setConjugation", MolOps::setConjugation(mol),                  \
-               mol.getNumBonds(), DATASET, SUFFIX, TAG)                        \
-  BENCH_RO_ADV("setHybridization", MolOps::setHybridization(mol),              \
-               mol.getNumAtoms(), DATASET, SUFFIX, TAG)                        \
-  BENCH_RD_ADV("setHybridization", MolOps::setHybridization(mol),              \
-               mol.getNumAtoms(), DATASET, SUFFIX, TAG)                        \
-  BENCH_RO_ADV("adjustHs", MolOps::adjustHs(mol), mol.getNumAtoms(), DATASET,  \
-               SUFFIX, TAG)                                                    \
-  BENCH_RD_ADV("adjustHs", MolOps::adjustHs(mol), mol.getNumAtoms(), DATASET,  \
-               SUFFIX, TAG)                                                    \
-  BENCH_RO_ADV("assignRadicals", MolOps::assignRadicals(mol),                  \
-               mol.getNumAtoms(), DATASET, SUFFIX, TAG)                        \
-  BENCH_RD_ADV("assignRadicals", MolOps::assignRadicals(mol),                  \
-               mol.getNumAtoms(), DATASET, SUFFIX, TAG)                        \
-  BENCH_RO_ADV("cleanupChirality", MolOps::cleanupChirality(mol),              \
-               mol.getNumAtoms(), DATASET, SUFFIX, TAG)                        \
-  BENCH_RD_ADV("cleanupChirality", MolOps::cleanupChirality(mol),              \
-               mol.getNumAtoms(), DATASET, SUFFIX, TAG)                        \
-  BENCH_RO_ADV("Kekulize", MolOps::Kekulize(mol, true, false),                 \
-               mol.getNumBonds(), DATASET, SUFFIX, TAG)                        \
-  BENCH_RD_ADV("Kekulize", MolOps::Kekulize(mol, true, false),                 \
-               mol.getNumBonds(), DATASET, SUFFIX, TAG)
+  BENCH_GETMOLFRAGS(DATASET, SUFFIX, TAG)
 
 BENCH_OPS_FOR(Dataset::Size_00_20, "size 00-20", "[size_00_20]")
 BENCH_OPS_FOR(Dataset::Size_20_40, "size 20-40", "[size_20_40]")
@@ -461,6 +539,55 @@ BENCH_OPS_FOR(Dataset::Rings_3, "rings 3", "[rings_3]")
 BENCH_OPS_FOR(Dataset::Rings_4, "rings 4", "[rings_4]")
 BENCH_OPS_FOR(Dataset::Rings_5, "rings 5", "[rings_5]")
 BENCH_OPS_FOR(Dataset::Rings_6, "rings 6", "[rings_6]")
+
+// Per-bucket sub-step benches using BENCH_STAGE for correct priming.
+#define BENCH_STAGE_FOR_BUCKETS(DATASET, SUFFIX, TAG)                          \
+  BENCH_STAGE("cleanUp", SanitizeStage::cleanUp, MolOps::cleanUp(mol),         \
+              MolOps::cleanUp(mol), mol.getNumAtoms(), DATASET, SUFFIX, TAG)   \
+  BENCH_STAGE("cleanUpOrganometallics",                                       \
+              SanitizeStage::cleanUpOrganometallics,                           \
+              MolOps::cleanUpOrganometallics(mol),                             \
+              MolOps::cleanUpOrganometallics(mol), mol.getNumAtoms(), DATASET, \
+              SUFFIX, TAG)                                                     \
+  BENCH_STAGE("updatePropertyCache_first",                                    \
+              SanitizeStage::updatePropertyCache_first,                        \
+              mol.updatePropertyCache(true), mol.updatePropertyCache(true),    \
+              mol.getNumAtoms(), DATASET, SUFFIX, TAG)                         \
+  BENCH_STAGE("symmetrizeSSSR", SanitizeStage::symmetrizeSSSR,                \
+              (void)MolOps::symmetrizeSSSR(mol),                               \
+              (void)MolOps::symmetrizeSSSR(mol), mol.getNumAtoms(), DATASET,   \
+              SUFFIX, TAG)                                                     \
+  BENCH_STAGE("Kekulize", SanitizeStage::Kekulize,                            \
+              MolOps::Kekulize(mol, true, false),                              \
+              MolOps::Kekulize(mol, true, false), mol.getNumBonds(), DATASET,  \
+              SUFFIX, TAG)                                                     \
+  BENCH_STAGE("assignRadicals", SanitizeStage::assignRadicals,                \
+              MolOps::assignRadicals(mol), MolOps::assignRadicals(mol),        \
+              mol.getNumAtoms(), DATASET, SUFFIX, TAG)                         \
+  BENCH_STAGE("setAromaticity", SanitizeStage::setAromaticity,                \
+              (void)MolOps::setAromaticity(mol),                               \
+              (void)MolOps::setAromaticity(mol), mol.getNumAtoms(), DATASET,   \
+              SUFFIX, TAG)                                                     \
+  BENCH_STAGE("setConjugation", SanitizeStage::setConjugation,                \
+              MolOps::setConjugation(mol), MolOps::setConjugation(mol),        \
+              mol.getNumBonds(), DATASET, SUFFIX, TAG)                         \
+  BENCH_STAGE("setHybridization", SanitizeStage::setHybridization,            \
+              MolOps::setHybridization(mol), MolOps::setHybridization(mol),    \
+              mol.getNumAtoms(), DATASET, SUFFIX, TAG)                         \
+  BENCH_STAGE("cleanupAtropisomers", SanitizeStage::cleanupAtropisomers,      \
+              MolOps::cleanupAtropisomers(mol),                                \
+              MolOps::cleanupAtropisomers(mol), mol.getNumAtoms(), DATASET,    \
+              SUFFIX, TAG)                                                     \
+  BENCH_STAGE("cleanupChirality", SanitizeStage::cleanupChirality,            \
+              MolOps::cleanupChirality(mol), MolOps::cleanupChirality(mol),    \
+              mol.getNumAtoms(), DATASET, SUFFIX, TAG)                         \
+  BENCH_STAGE("adjustHs", SanitizeStage::adjustHs, MolOps::adjustHs(mol),     \
+              MolOps::adjustHs(mol), mol.getNumAtoms(), DATASET, SUFFIX, TAG)
+
+BENCH_STAGE_FOR_BUCKETS(Dataset::Size_00_20, "size 00-20", "[size_00_20]")
+BENCH_STAGE_FOR_BUCKETS(Dataset::Size_40_60, "size 40-60", "[size_40_60]")
+BENCH_STAGE_FOR_BUCKETS(Dataset::Size_60_80, "size 60-80", "[size_60_80]")
+BENCH_STAGE_FOR_BUCKETS(Dataset::Rings_4, "rings 4", "[rings_4]")
 
 // ---------------------------------------------------------------------------
 // Edge-case benches. These target inner branches in cleanUp / assignRadicals /
