@@ -28,13 +28,12 @@ void backTrack(RDMol &mol, INT_INT_DEQ_MAP &, int lastOpt, INT_VECT &done,
   // remove on done list that comes after the lastOpt including itself
 
   auto ei = std::find(done.begin(), done.end(), lastOpt);
-  INT_VECT tdone;
-  tdone.insert(tdone.end(), done.begin(), ei);
+  INT_VECT tdone(done.begin(), ei);
 
-  INT_VECT_CRI eri = std::find(done.rbegin(), done.rend(), lastOpt);
+  auto eri = std::find(done.rbegin(), done.rend(), lastOpt);
   ++eri;
   // and push them back onto the stack
-  for (INT_VECT_CRI ri = done.rbegin(); ri != eri; ++ri) {
+  for (auto ri = done.rbegin(); ri != eri; ++ri) {
     aqueue.push_front(*ri);
   }
 
@@ -463,15 +462,15 @@ bool kekulizeWorker(RDMol &mol, const INT_VECT &allAtms,
           return false;
         }
       }  // end of else try to backtrack
-    }  // end of curr atom atom being a cand for double bond
-  }  // end of while we are not done with all atoms
+    }    // end of curr atom atom being a cand for double bond
+  }      // end of while we are not done with all atoms
   return true;
 }
 
 class QuestionEnumerator {
  public:
   QuestionEnumerator(INT_VECT questions)
-      : d_questions(std::move(questions)), d_pos(1) {};
+      : d_questions(std::move(questions)), d_pos(1){};
   INT_VECT next() {
     INT_VECT res;
     if (d_pos >= (0x1u << d_questions.size())) {

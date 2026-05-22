@@ -28,6 +28,29 @@ using RINGINVAR = boost::dynamic_bitset<>;
 using RINGINVAR_SET = std::set<RINGINVAR>;
 using RINGINVAR_INT_VECT_MAP = std::map<RINGINVAR, std::vector<int>>;
 
+namespace {
+// Ports master's normalize_ring (#9208) to the CSR storage used by the
+// RDMol-shaped findSSSR(): the ring [begin, end) is rotated in place so
+// the first atom has the smallest index and the second atom is the
+// smaller-indexed neighbor of the first. Keeps SSSR output stable across
+// implementation tweaks. begin/end point into resAtoms (uint32_t span).
+inline void normalizeRingSlice(uint32_t *begin, uint32_t *end) {
+  if (end - begin < 2) {
+    return;
+  }
+  auto newStart = std::min_element(begin, end);
+  std::rotate(begin, newStart, end);
+  const std::size_t n = static_cast<std::size_t>(end - begin);
+  if (*(end - 1) < *(begin + 1)) {
+    // reverse the post-first segment; first atom stays put
+    const std::size_t numPairsToMove = (n - 1) / 2;
+    auto front = begin + 1;
+    std::swap_ranges(front, front + numPairsToMove,
+                     std::make_reverse_iterator(end));
+  }
+}
+}  // namespace
+
 namespace RingUtils {
 constexpr size_t MAX_BFSQ_SIZE = 200000;  // arbitrary huge value
 
@@ -1781,6 +1804,15 @@ int findSSSR(const RDMol &mol, RingInfoCache &ringInfo, bool includeDativeBonds,
         return rdcast<int>(ringInfo.numRings());
       }
     }
+
+    // Normalize each ring discovered in this fragment so SSSR output is
+    // independent of detection order (port of master's #9208).
+    for (std::size_t r = resBeginsFragBegin + 1; r < resBegins.size(); ++r) {
+      auto *ringBegin = resAtoms.data() + resBegins[r - 1];
+      auto *ringEnd = resAtoms.data() + resBegins[r];
+      normalizeRingSlice(ringBegin, ringEnd);
+    }
+
     // if we have more than expected we need to do some cleanup
     // otherwise do som clean up work
     if (ssiz > nexpt) {

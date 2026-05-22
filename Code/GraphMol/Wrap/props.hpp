@@ -413,9 +413,11 @@ PyObject *GetPyPropImpl(const RDOb *obj, const std::string &key,
       return nullptr;
     }
   } else {
-    // Try getDict() path first (old Dict-based backend).
-    // Fall through to getPropIfPresent fallback for backends that don't
-    // implement getDict() (e.g. RDMol / minimal_rdmol).
+    // Try getDict() path first (Dict-backed backends: ROMol, RWMol, Atom,
+    // Bond, Conformer in pre-RDMol-port builds). Fall through to the
+    // per-type getPropIfPresent cascade for post-port Atom/Bond/ROMol
+    // facades, which raiseNonImplementedFunction("GetDict") because the
+    // properties live in the flat per-element arrays on RDMol.
     try {
       const auto &rd_dict = obj->getDict();
       for (const auto &rdvalue : rd_dict) {
@@ -583,7 +585,14 @@ PyObject *GetPyPropImpl(const RDOb *obj, const std::string &key,
     }
   } catch (...) {}
 
-  // Property not found via fallback either.
+  // We reach here in two cases:
+  //   (a) the getDict() switch fell through (AnyTag key, or no matching key
+  //       in dict) and the per-type cascade also returned nothing,
+  //   (b) the getDict() call threw (post-RDMol-port facades) and the
+  //       per-type cascade fell through.
+  // For both, fall back to the default_val if provided and the key is
+  // genuinely absent; otherwise raise KeyError so callers can distinguish
+  // missing key from unrepresentable AnyTag value.
   if (default_val_ptr && !obj->hasProp(key)) {
     return rawPy(*default_val_ptr);
   }

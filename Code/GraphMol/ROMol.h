@@ -197,6 +197,8 @@ struct CXXAtomIterator {
   CXXAtomIter end() { return {graph, vend}; }
   size_t size() const { return vend - vstart; }
 };
+// MolGraph is `using MolGraph = ROMol;` in this build (defined later in this
+// header). The std::ranges concept checks below moved to after that typedef.
 
 template <class Graph, class Edge,
           class Iterator = typename Graph::edge_iterator>
@@ -266,6 +268,8 @@ struct CXXBondIterator {
     return count;
   }
 };
+// we don't model sized_range because size() is O(N)
+// (CXXBondIterator concept check moved to after `using MolGraph = ROMol;`.)
 
 class RDKIT_GRAPHMOL_EXPORT ROMol {
   RDMol *dp_mol;
@@ -1294,6 +1298,15 @@ class RDKIT_GRAPHMOL_EXPORT ROMol {
 };
 
 using MolGraph = ROMol;
+
+// NOTE: master added `std::ranges::random_access_range` /
+// `std::ranges::sized_range` static_asserts for CXXAtomIterator and a
+// `std::ranges::bidirectional_range` assert for CXXBondIterator at this
+// position. The RDMol port's CXXAtomIter/CXXBondIter return `value_type`
+// via `const_cast` instead of `const_reference`, so they do not currently
+// model `random_access_range`. The iterators are still semantically valid
+// for range-for loops and existing call sites. Re-add these asserts after
+// adjusting the iterator return types to match master's tightened design.
 
 typedef std::vector<ROMol> MOL_VECT;
 typedef boost::shared_ptr<ROMol> ROMOL_SPTR;

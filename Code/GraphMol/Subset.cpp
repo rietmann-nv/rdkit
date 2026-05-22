@@ -17,7 +17,8 @@ namespace RDKit {
 namespace {
 
 inline void copyComputedProps(const ROMol &src, ROMol &dst) {
-  // Only clear mol-scoped props so atom/bond props survive in RDMol
+  // Clear any mol-scoped props first so they don't survive across
+  // updateProps and accidentally pin atom/bond indices from src on dst.
   for (const auto &prop : dst.getPropList(true, true)) {
     dst.clearProp(prop);
   }
@@ -34,6 +35,108 @@ inline void copyComputedProps(const ROMol &src, ROMol &dst) {
   dst.clearProp("_StereochemDone");
   dst.clearProp("_ringStereoAtomsAll");
   dst.clearProp("_ringStereoAtomsBegins");
+}
+
+atomindex_t getOtherAtomIdx(const ROMol &ref_mol, const Bond &ref_bond,
+                            atomindex_t dblBndAtomIdx,
+                            atomindex_t stereoAtomIdx) {
+  auto ref_atom = ref_bond.getBeginAtom();
+  auto other_atom = ref_bond.getEndAtom();
+  if (other_atom->getIdx() == dblBndAtomIdx) {
+    std::swap(ref_atom, other_atom);
+  }
+  CHECK_INVARIANT(ref_atom->getIdx() == dblBndAtomIdx,
+                "dblBndAtomIdx should be one of the bond's atoms");
+
+  for (auto nbr : ref_mol.atomNeighbors(ref_atom)) {
+    auto nbrIdx = nbr->getIdx();
+    if (nbrIdx != stereoAtomIdx && nbr != other_atom) {
+      return nbrIdx;
+    }
+  }
+
+  return RDKit::Atom::NOATOM;
+}
+
+void handleBondStereo(Bond &extracted_bond, const Bond &ref_bond,
+                      const ROMol &ref_mol,
+                      const std::map<unsigned int, unsigned int> &atomMapping) {
+  auto &atoms = extracted_bond.getStereoAtoms();
+  if (atoms.size() != 2) {
+    return;
+  }
+
+  bool needsSwap = false;
+  auto map1 = atomMapping.find(atoms[0]);
+  auto map2 = atomMapping.find(atoms[1]);
+
+  if (map1 == atomMapping.end()) {
+    auto begin_atom = ref_bond.getBeginAtom();
+    if (begin_atom->getDegree() < 3) {
+      // No alternative atom on this side; clear stereo from the bond
+      atoms.clear();
+      extracted_bond.setStereo(Bond::STEREONONE);
+      return;
+    }
+
+    auto otherNeighborIdx =
+        getOtherAtomIdx(ref_mol, ref_bond, begin_atom->getIdx(), atoms[0]);
+    map1 = atomMapping.find(otherNeighborIdx);
+    if (map1 == atomMapping.end()) {
+      // The alternative atom wasn't extracted either; clear stereo
+      atoms.clear();
+      extracted_bond.setStereo(Bond::STEREONONE);
+      return;
+    }
+
+    // Ok, we can swap the stereo atom to the other neighbor on this side
+    needsSwap = !needsSwap;
+  }
+
+  if (map2 == atomMapping.end()) {
+    auto end_atom = ref_bond.getEndAtom();
+    if (end_atom->getDegree() < 3) {
+      // No alternative atom on this side; clear stereo from the bond
+      atoms.clear();
+      extracted_bond.setStereo(Bond::STEREONONE);
+      return;
+    }
+
+    auto otherNeighborIdx =
+        getOtherAtomIdx(ref_mol, ref_bond, end_atom->getIdx(), atoms[1]);
+    map2 = atomMapping.find(otherNeighborIdx);
+    if (map2 == atomMapping.end()) {
+      // The alternative atom wasn't extracted either; clear stereo
+      atoms.clear();
+      extracted_bond.setStereo(Bond::STEREONONE);
+      return;
+    }
+
+    // Ok, we can swap the stereo atom to the other neighbor on this side
+    needsSwap = !needsSwap;
+  }
+
+  atoms[0] = map1->second;
+  atoms[1] = map2->second;
+
+  // Finally, update the label. Since CIP ranges may have changed,
+  // convert E/Z to CIS/TRANS to keep the right stereo.
+
+  if (!needsSwap) {
+    if (ref_bond.getStereo() == Bond::STEREOZ) {
+      extracted_bond.setStereo(Bond::STEREOCIS);
+    } else if (ref_bond.getStereo() == Bond::STEREOE) {
+      extracted_bond.setStereo(Bond::STEREOTRANS);
+    }
+  } else {
+    if (ref_bond.getStereo() == Bond::STEREOZ ||
+        ref_bond.getStereo() == Bond::STEREOCIS) {
+      extracted_bond.setStereo(Bond::STEREOTRANS);
+    } else if (ref_bond.getStereo() == Bond::STEREOE ||
+               ref_bond.getStereo() == Bond::STEREOTRANS) {
+      extracted_bond.setStereo(Bond::STEREOCIS);
+    }
+  }
 }
 
 static void copySelectedAtomsAndBonds(RWMol &extracted_mol,
@@ -74,12 +177,24 @@ static void copySelectedAtomsAndBonds(RWMol &extracted_mol,
       continue;
     }
     if (atomMapping.find(ref_bond->getBeginAtomIdx()) == atomMapping.end() ||
-	atomMapping.find(ref_bond->getEndAtomIdx()) == atomMapping.end()) {
-      throw ValueErrorException("copyMolSubset: subset bonds contain atoms not contained in subset atoms");
+        atomMapping.find(ref_bond->getEndAtomIdx()) == atomMapping.end()) {
+      throw ValueErrorException(
+          "copyMolSubset: subset bonds contain atoms not contained in subset atoms");
     }
-	
+
     std::unique_ptr<Bond> extracted_bond{
         options.copyAsQuery ? new QueryBond(*ref_bond) : ref_bond->copy()};
+
+    handleBondStereo(*extracted_bond, *ref_bond, reference_mol, atomMapping);
+
+    // Capture handleBondStereo's remapped state before release()/addBond so we
+    // can write it onto the RDMol BondData after the Bond facade is consumed.
+    // addBond in the post-RDMol-port world does not always transfer the
+    // facade's stereoAtoms vector to the underlying BondData.
+    const auto &remappedStereoAtoms = extracted_bond->getStereoAtoms();
+    std::vector<atomindex_t> savedStereoAtoms(remappedStereoAtoms.begin(),
+                                              remappedStereoAtoms.end());
+    const auto savedStereo = extracted_bond->getStereo();
 
     extracted_bond->setBeginAtomIdx(atomMapping[ref_bond->getBeginAtomIdx()]);
     extracted_bond->setEndAtomIdx(atomMapping[ref_bond->getEndAtomIdx()]);
@@ -88,22 +203,14 @@ static void copySelectedAtomsAndBonds(RWMol &extracted_mol,
     auto num_bonds =
         extracted_mol.addBond(extracted_bond.release(), takeOwnership);
     bondMapping[ref_bond->getIdx()] = num_bonds - 1;
-    // Remap stereo atoms to avoid stale indices from the source molecule
-    const auto &refStereoAtoms = ref_bond->getStereoAtoms();
-    if (refStereoAtoms.size() == 2) {
-      auto map1 = atomMapping.find(refStereoAtoms[0]);
-      auto map2 = atomMapping.find(refStereoAtoms[1]);
-      if (map1 != atomMapping.end() && map2 != atomMapping.end()) {
-        extracted_mol.asRDMol().setBondStereoAtoms(
-            bondMapping[ref_bond->getIdx()], map1->second, map2->second);
-      } else {
-        extracted_mol.asRDMol().clearBondStereoAtoms(
-            bondMapping[ref_bond->getIdx()]);
-      }
+    const auto newBondIdx = bondMapping[ref_bond->getIdx()];
+    if (savedStereoAtoms.size() == 2) {
+      extracted_mol.asRDMol().setBondStereoAtoms(
+          newBondIdx, savedStereoAtoms[0], savedStereoAtoms[1]);
     } else {
-      extracted_mol.asRDMol().clearBondStereoAtoms(
-          bondMapping[ref_bond->getIdx()]);
+      extracted_mol.asRDMol().clearBondStereoAtoms(newBondIdx);
     }
+    extracted_mol.getBondWithIdx(newBondIdx)->setStereo(savedStereo);
     // Clear computed props copied by initFromOther() to avoid stale indices
     auto *new_bond =
         extracted_mol.getBondWithIdx(bondMapping[ref_bond->getIdx()]);
