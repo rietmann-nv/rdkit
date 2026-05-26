@@ -14,17 +14,10 @@
 //                      order.  No allocation, no bulk shortcut.  Measures
 //                      the steady-state mutate/read-one-prop cost.
 //
-// Attribute extraction comes in two flavours where applicable.
-//   *_loop  - both sides walk atoms/bonds and copy a single attribute
-//             into a destination vector.  Apples-to-apples loop pattern.
-//   *_bulk  - RDMol-only; uses getAtomPropArrayIfPresent or equivalent
-//             to extract the whole array via memcpy/std::copy.  No
-//             ROMol leg because ROMol does not expose contiguous prop
-//             storage.
-//
-// Iteration benches keep the per-element op minimal (sum of one
-// integer-typed attribute) so the measurement reflects access pattern,
-// not work.
+// Iteration / accessor benches keep the per-element op minimal (sum of
+// one integer-typed attribute into a uint32_t accumulator) so the
+// measurement reflects access pattern, not work, and so the accumulator
+// itself cannot be hoisted or dead-store-eliminated.
 
 #include <catch2/catch_all.hpp>
 
@@ -348,142 +341,6 @@ std::vector<std::vector<uint32_t>> per_sample_shuffled_atom_indices(
           }                                                                    \
         }                                                                      \
         return uint64_t(total);                                                \
-      });                                                                      \
-    };                                                                         \
-  }
-
-// ---------------------------------------------------------------------------
-// Group 3: intrinsic-attribute extraction (push_back into a vector)
-// ---------------------------------------------------------------------------
-
-#define BENCH_EXTRACT_ATOMICNUMS(DATASET, SUFFIX, TAG)                         \
-  TEST_CASE("ROMol extract atomicNums " SUFFIX, "[mol_api]" TAG) {             \
-    auto samples = load_samples(DATASET);                                      \
-    BENCHMARK_ADVANCED("ROMol extract atomicNums " SUFFIX)                     \
-    (Catch::Benchmark::Chronometer meter) {                                    \
-      std::vector<int> sink;                                                   \
-      run_per_sample_readonly(samples, meter, [&sink](const ROMol &mol) {     \
-        sink.clear();                                                          \
-        sink.reserve(mol.getNumAtoms());                                       \
-        for (auto atom : mol.atoms()) {                                        \
-          sink.push_back(atom->getAtomicNum());                                \
-        }                                                                      \
-        return uint64_t(sink.size());                                          \
-      });                                                                      \
-    };                                                                         \
-  }                                                                            \
-  TEST_CASE("RDMol extract atomicNums " SUFFIX, "[mol_api][rdmol]" TAG) {      \
-    auto samples = load_rdmol_samples(DATASET);                                \
-    BENCHMARK_ADVANCED("RDMol extract atomicNums " SUFFIX)                     \
-    (Catch::Benchmark::Chronometer meter) {                                    \
-      std::vector<uint32_t> sink;                                              \
-      run_per_sample_readonly(samples, meter, [&sink](const RDMol &mol) {     \
-        const auto &atomData = mol.getAtomDataVector();                        \
-        sink.clear();                                                          \
-        sink.reserve(atomData.size());                                         \
-        for (const auto &atom : atomData) {                                    \
-          sink.push_back(atom.getAtomicNum());                                 \
-        }                                                                      \
-        return uint64_t(sink.size());                                          \
-      });                                                                      \
-    };                                                                         \
-  }
-
-#define BENCH_EXTRACT_FORMAL_CHARGES(DATASET, SUFFIX, TAG)                     \
-  TEST_CASE("ROMol extract formalCharges " SUFFIX, "[mol_api]" TAG) {          \
-    auto samples = load_samples(DATASET);                                      \
-    BENCHMARK_ADVANCED("ROMol extract formalCharges " SUFFIX)                  \
-    (Catch::Benchmark::Chronometer meter) {                                    \
-      std::vector<int> sink;                                                   \
-      run_per_sample_readonly(samples, meter, [&sink](const ROMol &mol) {     \
-        sink.clear();                                                          \
-        sink.reserve(mol.getNumAtoms());                                       \
-        for (auto atom : mol.atoms()) {                                        \
-          sink.push_back(atom->getFormalCharge());                             \
-        }                                                                      \
-        return uint64_t(sink.size());                                          \
-      });                                                                      \
-    };                                                                         \
-  }                                                                            \
-  TEST_CASE("RDMol extract formalCharges " SUFFIX, "[mol_api][rdmol]" TAG) {   \
-    auto samples = load_rdmol_samples(DATASET);                                \
-    BENCHMARK_ADVANCED("RDMol extract formalCharges " SUFFIX)                  \
-    (Catch::Benchmark::Chronometer meter) {                                    \
-      std::vector<int8_t> sink;                                                \
-      run_per_sample_readonly(samples, meter, [&sink](const RDMol &mol) {     \
-        const auto &atomData = mol.getAtomDataVector();                        \
-        sink.clear();                                                          \
-        sink.reserve(atomData.size());                                         \
-        for (const auto &atom : atomData) {                                    \
-          sink.push_back(atom.getFormalCharge());                              \
-        }                                                                      \
-        return uint64_t(sink.size());                                          \
-      });                                                                      \
-    };                                                                         \
-  }
-
-#define BENCH_EXTRACT_MASSES(DATASET, SUFFIX, TAG)                             \
-  TEST_CASE("ROMol extract masses " SUFFIX, "[mol_api]" TAG) {                 \
-    auto samples = load_samples(DATASET);                                      \
-    BENCHMARK_ADVANCED("ROMol extract masses " SUFFIX)                         \
-    (Catch::Benchmark::Chronometer meter) {                                    \
-      std::vector<double> sink;                                                \
-      run_per_sample_readonly(samples, meter, [&sink](const ROMol &mol) {     \
-        sink.clear();                                                          \
-        sink.reserve(mol.getNumAtoms());                                       \
-        for (auto atom : mol.atoms()) {                                        \
-          sink.push_back(atom->getMass());                                     \
-        }                                                                      \
-        return uint64_t(sink.size());                                          \
-      });                                                                      \
-    };                                                                         \
-  }                                                                            \
-  TEST_CASE("RDMol extract masses " SUFFIX, "[mol_api][rdmol]" TAG) {          \
-    auto samples = load_rdmol_samples(DATASET);                                \
-    BENCHMARK_ADVANCED("RDMol extract masses " SUFFIX)                         \
-    (Catch::Benchmark::Chronometer meter) {                                    \
-      std::vector<double> sink;                                                \
-      run_per_sample_readonly(samples, meter, [&sink](const RDMol &mol) {     \
-        const auto &atomData = mol.getAtomDataVector();                        \
-        sink.clear();                                                          \
-        sink.reserve(atomData.size());                                         \
-        for (const auto &atom : atomData) {                                    \
-          sink.push_back(atom.getMass());                                      \
-        }                                                                      \
-        return uint64_t(sink.size());                                          \
-      });                                                                      \
-    };                                                                         \
-  }
-
-#define BENCH_EXTRACT_BOND_TYPES(DATASET, SUFFIX, TAG)                         \
-  TEST_CASE("ROMol extract bondTypes " SUFFIX, "[mol_api]" TAG) {              \
-    auto samples = load_samples(DATASET);                                      \
-    BENCHMARK_ADVANCED("ROMol extract bondTypes " SUFFIX)                      \
-    (Catch::Benchmark::Chronometer meter) {                                    \
-      std::vector<uint8_t> sink;                                               \
-      run_per_sample_readonly(samples, meter, [&sink](const ROMol &mol) {     \
-        sink.clear();                                                          \
-        sink.reserve(mol.getNumBonds());                                       \
-        for (auto bond : mol.bonds()) {                                        \
-          sink.push_back(uint8_t(bond->getBondType()));                        \
-        }                                                                      \
-        return uint64_t(sink.size());                                          \
-      });                                                                      \
-    };                                                                         \
-  }                                                                            \
-  TEST_CASE("RDMol extract bondTypes " SUFFIX, "[mol_api][rdmol]" TAG) {       \
-    auto samples = load_rdmol_samples(DATASET);                                \
-    BENCHMARK_ADVANCED("RDMol extract bondTypes " SUFFIX)                      \
-    (Catch::Benchmark::Chronometer meter) {                                    \
-      std::vector<uint8_t> sink;                                               \
-      run_per_sample_readonly(samples, meter, [&sink](const RDMol &mol) {     \
-        const auto &bondData = mol.getBondDataVector();                        \
-        sink.clear();                                                          \
-        sink.reserve(bondData.size());                                         \
-        for (const auto &bond : bondData) {                                    \
-          sink.push_back(uint8_t(bond.getBondType()));                         \
-        }                                                                      \
-        return uint64_t(sink.size());                                          \
       });                                                                      \
     };                                                                         \
   }
@@ -1035,10 +892,6 @@ std::vector<std::vector<uint32_t>> per_sample_shuffled_atom_indices(
   BENCH_BOND_ITER_SUM_TWICEORDER(DATASET, SUFFIX, TAG)                         \
   BENCH_NEIGHBOR_WALK_SUM_DEGREE(DATASET, SUFFIX, TAG)                         \
   BENCH_BONDS_FROM_ATOM_SUM_ORDER(DATASET, SUFFIX, TAG)                        \
-  BENCH_EXTRACT_ATOMICNUMS(DATASET, SUFFIX, TAG)                               \
-  BENCH_EXTRACT_FORMAL_CHARGES(DATASET, SUFFIX, TAG)                           \
-  BENCH_EXTRACT_MASSES(DATASET, SUFFIX, TAG)                                   \
-  BENCH_EXTRACT_BOND_TYPES(DATASET, SUFFIX, TAG)                               \
   BENCH_PROP_SET_VARIED(DATASET, SUFFIX, TAG)                                  \
   BENCH_PROP_SET_UNIFORM(DATASET, SUFFIX, TAG)                                 \
   BENCH_PROP_SET_RANDOM_ACCESS(DATASET, SUFFIX, TAG)                           \
