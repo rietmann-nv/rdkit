@@ -31,6 +31,8 @@
 #include <GraphMol/RDMol.h>
 #include <GraphMol/ROMol.h>
 #include <GraphMol/RingInfo.h>
+#include <GraphMol/Fingerprints/FingerprintUtil.h>
+#include <GraphMol/Fingerprints/MorganGenerator.h>
 #include <RDGeneral/types.h>
 
 #include "bench_common.hpp"
@@ -882,6 +884,83 @@ std::vector<std::vector<uint32_t>> per_sample_shuffled_atom_indices(
   }
 
 // ---------------------------------------------------------------------------
+// Group 7: composite per-atom / per-bond field-touch loops
+// (Morgan atom & bond invariants).
+//
+// The atom-invariant body reads atomicNum + totalDegree + totalNumHs +
+// formalCharge + mass + ring-membership per atom -- five-plus fields
+// from the same AtomData slot, so the cache line fetched for the first
+// field is reused by the rest. This is the AoS sweet spot and the
+// realistic per-atom shape that downstream featurisers actually use.
+// The bond-invariant body is intentionally narrower (1-2 BondData
+// fields) and acts as the contrast row.
+//
+// The benches call the real library functions (MorganFingerprints::
+// getConnectivityInvariants and MorganBondInvGenerator::getBondInvariants)
+// with the result vector pre-sized so the timed region measures the
+// field-touch / hash work, not allocator noise.
+// ---------------------------------------------------------------------------
+
+#define BENCH_MORGAN_ATOM_INVARIANTS(DATASET, SUFFIX, TAG)                     \
+  TEST_CASE("ROMol Morgan atom invariants " SUFFIX, "[mol_api]" TAG) {         \
+    auto raw = load_samples(DATASET);                                          \
+    auto samples = prime_samples(std::move(raw), [](ROMol &mol) {              \
+      MolOps::findSSSR(mol);                                                   \
+    });                                                                        \
+    size_t maxAtoms = 0;                                                       \
+    for (const auto &mol : samples) {                                          \
+      maxAtoms = std::max<size_t>(maxAtoms, mol.getNumAtoms());                \
+    }                                                                          \
+    std::vector<std::uint32_t> invars(maxAtoms, 0);                            \
+    BENCHMARK_ADVANCED("ROMol Morgan atom invariants " SUFFIX)                 \
+    (Catch::Benchmark::Chronometer meter) {                                    \
+      run_per_sample_readonly(samples, meter,                                  \
+                              [&invars](const ROMol &mol) {                    \
+        MorganFingerprints::getConnectivityInvariants(mol, invars, true);      \
+        return uint64_t(invars[0]);                                            \
+      });                                                                      \
+    };                                                                         \
+  }                                                                            \
+  TEST_CASE("RDMol Morgan atom invariants " SUFFIX, "[mol_api][rdmol]" TAG) {  \
+    auto raw = load_rdmol_samples(DATASET);                                    \
+    auto samples = prime_samples(std::move(raw), [](RDMol &mol) {              \
+      MolOps::findSSSR(mol, mol.getRingInfo());                                \
+    });                                                                        \
+    size_t maxAtoms = 0;                                                       \
+    for (const auto &mol : samples) {                                          \
+      maxAtoms = std::max<size_t>(maxAtoms, mol.getNumAtoms());                \
+    }                                                                          \
+    std::vector<std::uint32_t> invars(maxAtoms, 0);                            \
+    BENCHMARK_ADVANCED("RDMol Morgan atom invariants " SUFFIX)                 \
+    (Catch::Benchmark::Chronometer meter) {                                    \
+      run_per_sample_readonly(samples, meter,                                  \
+                              [&invars](const RDMol &mol) {                    \
+        MorganFingerprints::getConnectivityInvariants(mol, invars, true);      \
+        return uint64_t(invars[0]);                                            \
+      });                                                                      \
+    };                                                                         \
+  }
+
+// Bond invariants. On the rdmol branch the only public signature is
+// (const RDMol&); the ROMol leg of this comparison lives on the master
+// backport branch where the API still takes (const ROMol&). So only the
+// RDMol leg is defined here.
+#define BENCH_MORGAN_BOND_INVARIANTS(DATASET, SUFFIX, TAG)                     \
+  TEST_CASE("RDMol Morgan bond invariants " SUFFIX, "[mol_api][rdmol]" TAG) {  \
+    auto samples = load_rdmol_samples(DATASET);                                \
+    MorganFingerprint::MorganBondInvGenerator gen(/*useBondTypes=*/true,       \
+                                                  /*useChirality=*/false);     \
+    BENCHMARK_ADVANCED("RDMol Morgan bond invariants " SUFFIX)                 \
+    (Catch::Benchmark::Chronometer meter) {                                    \
+      run_per_sample_readonly(samples, meter, [&gen](const RDMol &mol) {       \
+        std::unique_ptr<std::vector<std::uint32_t>> invars(                    \
+            gen.getBondInvariants(mol));                                       \
+        return uint64_t(invars->empty() ? 0u : invars->front());               \
+      });                                                                      \
+    };                                                                         \
+  }
+
+// ---------------------------------------------------------------------------
 // Bench instantiations across datasets
 // ---------------------------------------------------------------------------
 
@@ -902,7 +981,9 @@ std::vector<std::vector<uint32_t>> per_sample_shuffled_atom_indices(
   BENCH_ACCESSOR_DEGREE(DATASET, SUFFIX, TAG)                                  \
   BENCH_ACCESSOR_NUM_IMPLICIT_HS(DATASET, SUFFIX, TAG)                         \
   BENCH_RING_NUM_ATOM_RINGS(DATASET, SUFFIX, TAG)                              \
-  BENCH_RING_NUM_BOND_RINGS(DATASET, SUFFIX, TAG)
+  BENCH_RING_NUM_BOND_RINGS(DATASET, SUFFIX, TAG)                               \
+  BENCH_MORGAN_ATOM_INVARIANTS(DATASET, SUFFIX, TAG)                           \
+  BENCH_MORGAN_BOND_INVARIANTS(DATASET, SUFFIX, TAG)
 
 BENCH_API_FOR(Dataset::Canonical, "", "[canonical]")
 BENCH_API_FOR(Dataset::Size_00_20, "size 00-20", "[size_00_20]")
