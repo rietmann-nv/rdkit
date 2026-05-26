@@ -114,13 +114,14 @@ std::map<unsigned int, std::vector<unsigned int>> getIsoMap(RDMol &mol) {
   // the molecule's current isotope-bearing H neighbors below.
   mol.clearAtomPropIfPresent(common_properties::_isotopicHsToken);
   auto &bondVec = mol.getBondDataVector();
+  const auto &atomVec = mol.getAtomDataVector();
   for (uint32_t bondIdx = 0, numBonds = uint32_t(bondVec.size());
        bondIdx < numBonds; ++bondIdx) {
     const BondData &bond = bondVec[bondIdx];
     const atomindex_t baIdx = bond.getBeginAtomIdx();
     const atomindex_t eaIdx = bond.getEndAtomIdx();
-    const AtomData &ba = mol.getAtom(baIdx);
-    const AtomData &ea = mol.getAtom(eaIdx);
+    const AtomData &ba = atomVec[baIdx];
+    const AtomData &ea = atomVec[eaIdx];
     int ha = -1;
     unsigned int iso = 0;
     if (ba.getAtomicNum() == 1 && ba.getIsotope() && ea.getAtomicNum() != 1) {
@@ -176,9 +177,10 @@ int atomPerturbationOrder(const RDMol &mol, atomindex_t atomIdx,
 bool may_need_extra_H(const RDMol &mol, atomindex_t atomIdx) {
   unsigned single_bonds = 0;
   unsigned aromatic_bonds = 0;
+  const auto &bondVec = mol.getBondDataVector();
   auto [bondBegin, bondEnd] = mol.getAtomBonds(atomIdx);
   for (auto it = bondBegin; it != bondEnd; ++it) {
-    const BondData &bond = mol.getBond(*it);
+    const BondData &bond = bondVec[*it];
     if (bond.getBondType() == BondEnums::BondType::SINGLE) {
       ++single_bonds;
     } else if (bond.getBondType() == BondEnums::BondType::AROMATIC) {
@@ -187,7 +189,7 @@ bool may_need_extra_H(const RDMol &mol, atomindex_t atomIdx) {
       return false;
     }
   }
-  const AtomData &atom = mol.getAtom(atomIdx);
+  const AtomData &atom = mol.getAtomDataVector()[atomIdx];
   const unsigned int totalValence =
       atom.getValence(AtomData::ValenceType::EXPLICIT) +
       atom.getValence(AtomData::ValenceType::IMPLICIT);
@@ -557,19 +559,20 @@ void setTerminalAtomCoords(ROMol &mol, unsigned int idx,
 }
 
 namespace {
-bool isQueryAtom(const RWMol &mol, const Atom &atom) {
-  if (atom.hasQuery()) {
+bool isQueryAtom(const RDMol &mol, atomindex_t atomIdx) {
+  if (mol.hasAtomQuery(atomIdx)) {
     return true;
   }
-  for (const auto bnd : mol.atomBonds(&atom)) {
-    if (bnd->hasQuery()) {
+  auto [bondBegin, bondEnd] = mol.getAtomBonds(atomIdx);
+  for (auto it = bondBegin; it != bondEnd; ++it) {
+    if (mol.hasBondQuery(*it)) {
       return true;
     }
   }
   return false;
 }
 }  // namespace
-void addHs(RWMol &mol, const AddHsParameters &params,
+void addHs(RDMol &mol, const AddHsParameters &params,
            const UINT_VECT *onlyOnAtoms) {
   // when we hit each atom, clear its computed properties
   // NOTE: it is essential that we not clear the ring info in the
@@ -577,11 +580,8 @@ void addHs(RWMol &mol, const AddHsParameters &params,
   // regenerate that.  This caused Issue210 and Issue212:
   mol.clearComputedProps(false);
 
-  // precompute the number of hydrogens we are going to add so that we can
-  // pre-allocate the necessary space on the conformations of the molecule
-  // for their coordinates
-  unsigned int numAddHyds = 0;
-  boost::dynamic_bitset<> onAtoms(mol.getNumAtoms());
+  const uint32_t numHeavyAtoms = mol.getNumAtoms();
+  boost::dynamic_bitset<> onAtoms(numHeavyAtoms);
   if (onlyOnAtoms) {
     for (auto atIdx : *onlyOnAtoms) {
       onAtoms.set(atIdx);
@@ -589,107 +589,122 @@ void addHs(RWMol &mol, const AddHsParameters &params,
   } else {
     onAtoms.set();
   }
-  std::vector<unsigned int> numExplicitHs(mol.getNumAtoms(), 0);
-  std::vector<unsigned int> numImplicitHs(mol.getNumAtoms(), 0);
+  std::vector<unsigned int> numExplicitHs(numHeavyAtoms, 0);
+  std::vector<unsigned int> numImplicitHs(numHeavyAtoms, 0);
 
   // Ensure all atoms have implicit valence calculated (e.g., after unpickling)
-  // If noImplicit is false, the atom may need implicit valence calculated
-  // Skip query atoms (or atoms connected to query bonds) as they are handled separately
-  for (auto at : mol.atoms()) {
-    if (!at->getNoImplicit() && !isQueryAtom(mol, *at)) {
-      at->updatePropertyCache(false);
-    }
-  }
-
-  // Cache H counts before adding bonds (which will clear property cache per #8934)
-  for (auto at : mol.atoms()) {
-    numExplicitHs[at->getIdx()] = at->getNumExplicitHs();
-    numImplicitHs[at->getIdx()] = at->getNumImplicitHs();
-    if (onAtoms[at->getIdx()]) {
-      if (params.skipQueries && isQueryAtom(mol, *at)) {
-        onAtoms.set(at->getIdx(), 0);
-        continue;
-      }
-      
-      numAddHyds += at->getNumExplicitHs();
-      if (!params.explicitOnly) {
-        numAddHyds += at->getNumImplicitHs();
+  // Skip query atoms (or atoms connected to query bonds) as they are handled
+  // separately
+  {
+    auto &atomVec = mol.getAtomDataVector();
+    for (uint32_t aidx = 0; aidx < numHeavyAtoms; ++aidx) {
+      if (!atomVec[aidx].getNoImplicit() && !isQueryAtom(mol, aidx)) {
+        mol.updateAtomPropertyCache(aidx, false);
       }
     }
   }
-  unsigned int nSize = mol.getNumAtoms() + numAddHyds;
 
-  // loop over the conformations of the molecule and allocate new space
-  // for the H locations (need to do this even if we aren't adding coords so
-  // that the conformers have the correct number of atoms).
-  for (auto cfi = mol.beginConformers(); cfi != mol.endConformers(); ++cfi) {
-    (*cfi)->reserve(nSize);
+  // Cache H counts before adding bonds (which will clear property cache per
+  // #8934). Total Hs precomputed so we can pre-size the conformer storage.
+  unsigned int numAddHyds = 0;
+  {
+    const auto &atomVec = mol.getAtomDataVector();
+    for (uint32_t aidx = 0; aidx < numHeavyAtoms; ++aidx) {
+      const AtomData &atom = atomVec[aidx];
+      numExplicitHs[aidx] = atom.getNumExplicitHs();
+      numImplicitHs[aidx] = atom.getNumImplicitHs();
+      if (onAtoms[aidx]) {
+        if (params.skipQueries && isQueryAtom(mol, aidx)) {
+          onAtoms.set(aidx, 0);
+          continue;
+        }
+        numAddHyds += atom.getNumExplicitHs();
+        if (!params.explicitOnly) {
+          numAddHyds += atom.getNumImplicitHs();
+        }
+      }
+    }
+  }
+  const unsigned int nSize = numHeavyAtoms + numAddHyds;
+  if (mol.getNumConformers() > 0) {
+    mol.allocateConformers(mol.getNumConformers(), nSize);
   }
 
-  unsigned int stopIdx = mol.getNumAtoms();
-  for (unsigned int aidx = 0; aidx < stopIdx; ++aidx) {
+  // Add Hs one heavy atom at a time. Note: pulling atomVec/bondVec references
+  // before the loop is unsafe — addAtom/addBond can reallocate, invalidating
+  // references — so we re-fetch as needed inside the loop.
+  for (uint32_t aidx = 0; aidx < numHeavyAtoms; ++aidx) {
     if (!onAtoms[aidx]) {
       continue;
     }
 
-    Atom *newAt = mol.getAtomWithIdx(aidx);
-
     std::vector<unsigned int> isoHs;
-    if (newAt->getPropIfPresent(common_properties::_isotopicHs, isoHs)) {
-      newAt->clearProp(common_properties::_isotopicHs);
+    if (mol.getAtomPropIfPresent(common_properties::_isotopicHsToken, aidx,
+                                 isoHs)) {
+      mol.clearSingleAtomProp(common_properties::_isotopicHsToken, aidx);
     }
-    std::vector<unsigned int>::const_iterator isoH = isoHs.begin();
-    unsigned int newIdx;
-    newAt->clearComputedProps();
-    // always convert explicit Hs
-    unsigned int onumexpl = numExplicitHs[aidx];
+    auto isoH = isoHs.begin();
+
+    // Snapshot the explicit-H count up front, then zero it on the heavy atom
+    // before adding bonds (the addBond loop below will refresh derived
+    // properties; we need the explicit count cleared so updateAtomPropertyCache
+    // recomputes the new implicit valence correctly).
+    const unsigned int onumexpl = numExplicitHs[aidx];
     for (unsigned int i = 0; i < onumexpl; i++) {
-      newIdx = mol.addAtom(new Atom(1), false, true);
-      mol.addBond(aidx, newIdx, Bond::SINGLE);
-      auto hAtom = mol.getAtomWithIdx(newIdx);
-      hAtom->updatePropertyCache();
+      AtomData &hAtomData = mol.addAtom();
+      hAtomData.setAtomicNum(1);
+      const atomindex_t newIdx = atomindex_t(mol.getNumAtoms() - 1);
+      mol.addBond(aidx, newIdx, BondEnums::BondType::SINGLE);
+      mol.updateAtomPropertyCache(newIdx, true);
       if (params.addCoords) {
-        setTerminalAtomCoords(mol, newIdx, aidx);
+        ROMol &romol = mol.asROMol();
+        setTerminalAtomCoords(romol, newIdx, aidx);
       }
       if (isoH != isoHs.end()) {
-        hAtom->setIsotope(*isoH);
+        mol.getAtomDataVector()[newIdx].setIsotope(*isoH);
         ++isoH;
       }
     }
-    // clear the local property
-    newAt->setNumExplicitHs(0);
+    mol.getAtomDataVector()[aidx].setNumExplicitHs(0);
 
     if (!params.explicitOnly) {
-      // take care of implicits
       for (unsigned int i = 0; i < numImplicitHs[aidx]; i++) {
-        newIdx = mol.addAtom(new Atom(1), false, true);
-        mol.addBond(aidx, newIdx, Bond::SINGLE);
+        AtomData &hAtomData = mol.addAtom();
+        hAtomData.setAtomicNum(1);
+        const atomindex_t newIdx = atomindex_t(mol.getNumAtoms() - 1);
+        mol.addBond(aidx, newIdx, BondEnums::BondType::SINGLE);
         // set the isImplicit label so that we can strip these back
         // off later if need be.
-        auto hAtom = mol.getAtomWithIdx(newIdx);
-        hAtom->setProp(common_properties::isImplicit, 1);
-        hAtom->updatePropertyCache();
+        mol.setSingleAtomProp(common_properties::isImplicitToken, newIdx, 1);
+        mol.updateAtomPropertyCache(newIdx, true);
         if (params.addCoords) {
-          setTerminalAtomCoords(mol, newIdx, aidx);
+          ROMol &romol = mol.asROMol();
+          setTerminalAtomCoords(romol, newIdx, aidx);
         }
         if (isoH != isoHs.end()) {
-          hAtom->setIsotope(*isoH);
+          mol.getAtomDataVector()[newIdx].setIsotope(*isoH);
           ++isoH;
         }
       }
     }
-    // update the atom's derived properties (valence count, etc.)
-    // no sense in being strict here (was github #2782)
-    newAt->updatePropertyCache(false);
+    // refresh the heavy atom's derived properties (valence count, etc.) —
+    // non-strict per github #2782
+    mol.updateAtomPropertyCache(aidx, false);
     if (isoH != isoHs.end()) {
-      BOOST_LOG(rdWarningLog) << "extra H isotope information found on atom "
-                              << newAt->getIdx() << std::endl;
+      BOOST_LOG(rdWarningLog)
+          << "extra H isotope information found on atom " << aidx << std::endl;
     }
   }
   // take care of AtomPDBResidueInfo for Hs if root atom has it
   if (params.addResidueInfo) {
-    AssignHsResidueInfo(mol);
+    RWMol &rwmol = static_cast<RWMol &>(mol.asROMol());
+    AssignHsResidueInfo(rwmol);
   }
+}
+
+void addHs(RWMol &mol, const AddHsParameters &params,
+           const UINT_VECT *onlyOnAtoms) {
+  addHs(mol.asRDMol(), params, onlyOnAtoms);
 }
 
 namespace {

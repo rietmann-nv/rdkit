@@ -3,9 +3,9 @@
 Buckets: rings_2 through rings_6, capping heavy atom count at 60 to keep
 the variance separate from the size-scan dimension.
 
-Primary source: ~/data/chembl35_processed.smi (rich diversity across ring
-counts). Falls back to znp.50k.smi.gz + canonSmiles.long.smi when the
-primary is unavailable.
+Primary source: ChEMBL 35 processed SMILES at $CHEMBL35_SMI when set
+(rich diversity across ring counts). Falls back to znp.50k.smi.gz +
+canonSmiles.long.smi when the primary is unavailable.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ def main() -> int:
         primary_iter = lambda: iter_smi(chembl)
     else:
         print(
-            "warning: ~/data/chembl35_processed.smi not found; using in-repo "
+            "warning: $CHEMBL35_SMI not set or path missing; using in-repo "
             "fallback corpora",
             file=sys.stderr,
         )

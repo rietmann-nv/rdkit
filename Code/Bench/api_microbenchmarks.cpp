@@ -244,10 +244,9 @@ std::vector<std::vector<uint32_t>> per_sample_shuffled_atom_indices(
     BENCHMARK_ADVANCED("RDMol atoms loop sum atomicNum " SUFFIX)               \
     (Catch::Benchmark::Chronometer meter) {                                    \
       run_per_sample_readonly(samples, meter, [](const RDMol &mol) {           \
-        const uint32_t numAtoms = mol.getNumAtoms();                           \
         uint32_t total = 0;                                                    \
-        for (uint32_t i = 0; i < numAtoms; ++i) {                              \
-          total += mol.getAtom(i).getAtomicNum();                              \
+        for (const auto &atom : mol.getAtomDataVector()) {                     \
+          total += atom.getAtomicNum();                                        \
         }                                                                      \
         return uint64_t(total);                                                \
       });                                                                      \
@@ -274,10 +273,9 @@ std::vector<std::vector<uint32_t>> per_sample_shuffled_atom_indices(
     BENCHMARK_ADVANCED("RDMol bonds loop sum twiceBondType " SUFFIX)           \
     (Catch::Benchmark::Chronometer meter) {                                    \
       run_per_sample_readonly(samples, meter, [](const RDMol &mol) {           \
-        const uint32_t numBonds = mol.getNumBonds();                           \
         uint32_t total = 0;                                                    \
-        for (uint32_t i = 0; i < numBonds; ++i) {                              \
-          total += getTwiceBondType(mol.getBond(i).getBondType());             \
+        for (const auto &bond : mol.getBondDataVector()) {                     \
+          total += getTwiceBondType(bond.getBondType());                       \
         }                                                                      \
         return uint64_t(total);                                                \
       });                                                                      \
@@ -305,24 +303,6 @@ std::vector<std::vector<uint32_t>> per_sample_shuffled_atom_indices(
             "[mol_api][rdmol]" TAG) {                                          \
     auto samples = load_rdmol_samples(DATASET);                                \
     BENCHMARK_ADVANCED("RDMol atomNeighbors range sum degree " SUFFIX)         \
-    (Catch::Benchmark::Chronometer meter) {                                    \
-      run_per_sample_readonly(samples, meter, [](const RDMol &mol) {           \
-        const uint32_t numAtoms = mol.getNumAtoms();                           \
-        uint32_t total = 0;                                                    \
-        for (uint32_t i = 0; i < numAtoms; ++i) {                              \
-          for (auto nbr : mol.atomNeighbors(i)) {                              \
-            (void)nbr;                                                         \
-            ++total;                                                           \
-          }                                                                    \
-        }                                                                      \
-        return uint64_t(total);                                                \
-      });                                                                      \
-    };                                                                         \
-  }                                                                            \
-  TEST_CASE("RDMol getAtomNeighbors raw sum degree " SUFFIX,                   \
-            "[mol_api][rdmol]" TAG) {                                          \
-    auto samples = load_rdmol_samples(DATASET);                                \
-    BENCHMARK_ADVANCED("RDMol getAtomNeighbors raw sum degree " SUFFIX)        \
     (Catch::Benchmark::Chronometer meter) {                                    \
       run_per_sample_readonly(samples, meter, [](const RDMol &mol) {           \
         const uint32_t numAtoms = mol.getNumAtoms();                           \
@@ -359,28 +339,12 @@ std::vector<std::vector<uint32_t>> per_sample_shuffled_atom_indices(
     (Catch::Benchmark::Chronometer meter) {                                    \
       run_per_sample_readonly(samples, meter, [](const RDMol &mol) {           \
         const uint32_t numAtoms = mol.getNumAtoms();                           \
-        uint32_t total = 0;                                                    \
-        for (uint32_t i = 0; i < numAtoms; ++i) {                              \
-          for (auto &&bond : mol.atomBonds(i)) {                               \
-            total += getTwiceBondType(bond.data().getBondType());              \
-          }                                                                    \
-        }                                                                      \
-        return uint64_t(total);                                                \
-      });                                                                      \
-    };                                                                         \
-  }                                                                            \
-  TEST_CASE("RDMol getAtomBonds raw sum twiceBondType " SUFFIX,                \
-            "[mol_api][rdmol]" TAG) {                                          \
-    auto samples = load_rdmol_samples(DATASET);                                \
-    BENCHMARK_ADVANCED("RDMol getAtomBonds raw sum twiceBondType " SUFFIX)     \
-    (Catch::Benchmark::Chronometer meter) {                                    \
-      run_per_sample_readonly(samples, meter, [](const RDMol &mol) {           \
-        const uint32_t numAtoms = mol.getNumAtoms();                           \
+        const auto &bondData = mol.getBondDataVector();                        \
         uint32_t total = 0;                                                    \
         for (uint32_t i = 0; i < numAtoms; ++i) {                              \
           auto [begin, end] = mol.getAtomBonds(i);                             \
           for (const uint32_t *p = begin; p != end; ++p) {                     \
-            total += getTwiceBondType(mol.getBond(*p).getBondType());          \
+            total += getTwiceBondType(bondData[*p].getBondType());             \
           }                                                                    \
         }                                                                      \
         return uint64_t(total);                                                \
@@ -414,11 +378,11 @@ std::vector<std::vector<uint32_t>> per_sample_shuffled_atom_indices(
     (Catch::Benchmark::Chronometer meter) {                                    \
       std::vector<uint32_t> sink;                                              \
       run_per_sample_readonly(samples, meter, [&sink](const RDMol &mol) {     \
-        const uint32_t numAtoms = mol.getNumAtoms();                           \
+        const auto &atomData = mol.getAtomDataVector();                        \
         sink.clear();                                                          \
-        sink.reserve(numAtoms);                                                \
-        for (uint32_t i = 0; i < numAtoms; ++i) {                              \
-          sink.push_back(mol.getAtom(i).getAtomicNum());                       \
+        sink.reserve(atomData.size());                                         \
+        for (const auto &atom : atomData) {                                    \
+          sink.push_back(atom.getAtomicNum());                                 \
         }                                                                      \
         return uint64_t(sink.size());                                          \
       });                                                                      \
@@ -447,11 +411,11 @@ std::vector<std::vector<uint32_t>> per_sample_shuffled_atom_indices(
     (Catch::Benchmark::Chronometer meter) {                                    \
       std::vector<int8_t> sink;                                                \
       run_per_sample_readonly(samples, meter, [&sink](const RDMol &mol) {     \
-        const uint32_t numAtoms = mol.getNumAtoms();                           \
+        const auto &atomData = mol.getAtomDataVector();                        \
         sink.clear();                                                          \
-        sink.reserve(numAtoms);                                                \
-        for (uint32_t i = 0; i < numAtoms; ++i) {                              \
-          sink.push_back(mol.getAtom(i).getFormalCharge());                    \
+        sink.reserve(atomData.size());                                         \
+        for (const auto &atom : atomData) {                                    \
+          sink.push_back(atom.getFormalCharge());                              \
         }                                                                      \
         return uint64_t(sink.size());                                          \
       });                                                                      \
@@ -480,11 +444,11 @@ std::vector<std::vector<uint32_t>> per_sample_shuffled_atom_indices(
     (Catch::Benchmark::Chronometer meter) {                                    \
       std::vector<double> sink;                                                \
       run_per_sample_readonly(samples, meter, [&sink](const RDMol &mol) {     \
-        const uint32_t numAtoms = mol.getNumAtoms();                           \
+        const auto &atomData = mol.getAtomDataVector();                        \
         sink.clear();                                                          \
-        sink.reserve(numAtoms);                                                \
-        for (uint32_t i = 0; i < numAtoms; ++i) {                              \
-          sink.push_back(mol.getAtom(i).getMass());                            \
+        sink.reserve(atomData.size());                                         \
+        for (const auto &atom : atomData) {                                    \
+          sink.push_back(atom.getMass());                                      \
         }                                                                      \
         return uint64_t(sink.size());                                          \
       });                                                                      \
@@ -513,11 +477,11 @@ std::vector<std::vector<uint32_t>> per_sample_shuffled_atom_indices(
     (Catch::Benchmark::Chronometer meter) {                                    \
       std::vector<uint8_t> sink;                                               \
       run_per_sample_readonly(samples, meter, [&sink](const RDMol &mol) {     \
-        const uint32_t numBonds = mol.getNumBonds();                           \
+        const auto &bondData = mol.getBondDataVector();                        \
         sink.clear();                                                          \
-        sink.reserve(numBonds);                                                \
-        for (uint32_t i = 0; i < numBonds; ++i) {                              \
-          sink.push_back(uint8_t(mol.getBond(i).getBondType()));               \
+        sink.reserve(bondData.size());                                         \
+        for (const auto &bond : bondData) {                                    \
+          sink.push_back(uint8_t(bond.getBondType()));                         \
         }                                                                      \
         return uint64_t(sink.size());                                          \
       });                                                                      \
@@ -938,10 +902,11 @@ std::vector<std::vector<uint32_t>> per_sample_shuffled_atom_indices(
     BENCHMARK_ADVANCED("RDMol getAtomDegree all atoms " SUFFIX)                \
     (Catch::Benchmark::Chronometer meter) {                                    \
       run_per_sample_readonly(samples, meter, [](const RDMol &mol) {           \
+        const auto &starts = mol.getAtomBondStartsVector();                    \
         const uint32_t numAtoms = mol.getNumAtoms();                           \
         uint32_t total = 0;                                                    \
         for (uint32_t i = 0; i < numAtoms; ++i) {                              \
-          total += mol.getAtomDegree(i);                                       \
+          total += starts[i + 1] - starts[i];                                  \
         }                                                                      \
         return uint64_t(total);                                                \
       });                                                                      \
@@ -968,10 +933,9 @@ std::vector<std::vector<uint32_t>> per_sample_shuffled_atom_indices(
     BENCHMARK_ADVANCED("RDMol getNumImplicitHs all atoms " SUFFIX)             \
     (Catch::Benchmark::Chronometer meter) {                                    \
       run_per_sample_readonly(samples, meter, [](const RDMol &mol) {           \
-        const uint32_t numAtoms = mol.getNumAtoms();                           \
         uint32_t total = 0;                                                    \
-        for (uint32_t i = 0; i < numAtoms; ++i) {                              \
-          total += mol.getAtom(i).getNumImplicitHs();                          \
+        for (const auto &atom : mol.getAtomDataVector()) {                     \
+          total += atom.getNumImplicitHs();                                    \
         }                                                                      \
         return uint64_t(total);                                                \
       });                                                                      \
@@ -1089,6 +1053,7 @@ std::vector<std::vector<uint32_t>> per_sample_shuffled_atom_indices(
 
 BENCH_API_FOR(Dataset::Canonical, "", "[canonical]")
 BENCH_API_FOR(Dataset::Size_00_20, "size 00-20", "[size_00_20]")
+BENCH_API_FOR(Dataset::Size_20_40, "size 20-40", "[size_20_40]")
 BENCH_API_FOR(Dataset::Size_40_60, "size 40-60", "[size_40_60]")
 BENCH_API_FOR(Dataset::Size_60_80, "size 60-80", "[size_60_80]")
 BENCH_API_FOR(Dataset::Rings_4, "rings 4", "[rings_4]")

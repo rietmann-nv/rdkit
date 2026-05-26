@@ -145,20 +145,18 @@ def nci_first5k_path() -> Path:
 
 
 def chembl35_path() -> Path | None:
-    """Return the user's local ChEMBL 35 SMILES file, or None if absent.
+    """Return a ChEMBL 35 SMILES corpus path, or None if not configured.
 
-    Resolved from $CHEMBL35_SMI when set, otherwise
-    `~/data/chembl35_processed.smi`. The file is not part of the RDKit
-    repository because of its size (~2.5M molecules); the bench data
-    files committed under `Code/Bench/data/` were produced from this
-    corpus when it is available locally and from the in-repo fallback
-    corpora otherwise.
+    Resolved from the $CHEMBL35_SMI environment variable. The corpus is
+    not part of the RDKit repository because of its size (~2.5M
+    molecules); the bench data files committed under `Code/Bench/data/`
+    were produced from this corpus when $CHEMBL35_SMI was set and from
+    the in-repo fallback corpora otherwise.
     """
     override = os.environ.get("CHEMBL35_SMI")
-    if override:
-        path = Path(override).expanduser()
-    else:
-        path = Path.home() / "data" / "chembl35_processed.smi"
+    if not override:
+        return None
+    path = Path(override).expanduser()
     return path if path.exists() else None
 
 

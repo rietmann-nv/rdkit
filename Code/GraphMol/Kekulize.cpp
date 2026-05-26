@@ -69,6 +69,7 @@ void markDbondCands(RDMol &mol, const INT_VECT &allAtms,
   // - marks all aromatic bonds to single bonds
   // - marks atoms that can take a double bond
   const auto &atomVec = mol.getAtomDataVector();
+  auto &bondVec = mol.getBondDataVector();
   const RingInfoCache &ringInfo = mol.getRingInfo();
 
   const bool hasAromaticOrDummyAtom = std::any_of(
@@ -106,7 +107,7 @@ void markDbondCands(RDMol &mol, const INT_VECT &allAtms,
   for (int allAtm : allAtms) {
     inAllAtms.set(allAtm);
     const atomindex_t atomIdx = atomindex_t(allAtm);
-    AtomData &at = mol.getAtom(atomIdx);
+    const AtomData &at = atomVec[atomIdx];
 
     if (at.getAtomicNum() && !mol.isAromaticAtom(atomIdx)) {
       done.push_back(allAtm);
@@ -122,7 +123,7 @@ void markDbondCands(RDMol &mol, const INT_VECT &allAtms,
     auto [bondBegin, bondEnd] = mol.getAtomBonds(atomIdx);
     for (auto bIt = bondBegin; bIt != bondEnd; ++bIt) {
       const uint32_t bondIdx = *bIt;
-      BondData &bond = mol.getBond(bondIdx);
+      const BondData &bond = bondVec[bondIdx];
       const atomindex_t otherIdx = bond.getOtherAtomIdx(atomIdx);
       const AtomData &otherAt = atomVec[otherIdx];
       if (otherAt.getAtomicNum() && !otherAt.getIsAromatic() &&
@@ -228,7 +229,7 @@ void markDbondCands(RDMol &mol, const INT_VECT &allAtms,
 
   // now turn all the aromatic bonds in this fused system to single
   for (uint32_t bondIdx : makeSingle) {
-    mol.getBond(bondIdx).setBondType(BondEnums::BondType::SINGLE);
+    bondVec[bondIdx].setBondType(BondEnums::BondType::SINGLE);
   }
 }
 
@@ -236,6 +237,8 @@ bool kekulizeWorker(RDMol &mol, const INT_VECT &allAtms,
                     boost::dynamic_bitset<> dBndCands,
                     boost::dynamic_bitset<> dBndAdds, INT_VECT done,
                     const UINT_VECT &atomRanks, unsigned int maxBackTracks) {
+  const auto &atomVec = mol.getAtomDataVector();
+  auto &bondVec = mol.getBondDataVector();
   INT_DEQUE astack;
   INT_INT_DEQ_MAP options;
   int lastOpt = -1;
@@ -352,7 +355,7 @@ bool kekulizeWorker(RDMol &mol, const INT_VECT &allAtms,
       for (int nbrIdx : nbrs) {
         const uint32_t nbrBondIdx = mol.getBondIndexBetweenAtoms(
             atomindex_t(curr), atomindex_t(nbrIdx));
-        const BondData &nbrBond = mol.getBond(nbrBondIdx);
+        const BondData &nbrBond = bondVec[nbrBondIdx];
 
         // if the neighbor is not on the stack add it
         if (std::find(astack.begin(), astack.end(), nbrIdx) == astack.end()) {
@@ -370,8 +373,8 @@ bool kekulizeWorker(RDMol &mol, const INT_VECT &allAtms,
         // which of them is eligible to be converted.
         if (cCand && dBndCands[nbrIdx] &&
             (nbrBond.getIsAromatic() ||
-             mol.getAtom(atomindex_t(curr)).getAtomicNum() == 0 ||
-             mol.getAtom(atomindex_t(nbrIdx)).getAtomicNum() == 0)) {
+             atomVec[curr].getAtomicNum() == 0 ||
+             atomVec[nbrIdx].getAtomicNum() == 0)) {
           // in order to try and avoid making wedged bonds double, we will add
           // this neighbor at the back of the options after this loop if the
           // bond is wedged. otherwise we append it to the options directly
@@ -401,7 +404,7 @@ bool kekulizeWorker(RDMol &mol, const INT_VECT &allAtms,
         opts.pop_front();
         const uint32_t bondIdx = mol.getBondIndexBetweenAtoms(
             atomindex_t(curr), atomindex_t(ncnd));
-        BondData &bnd = mol.getBond(bondIdx);
+        BondData &bnd = bondVec[bondIdx];
         bnd.setBondType(BondEnums::BondType::DOUBLE);
         if (bnd.getBondDir() != BondEnums::BondDir::NONE) {
           bnd.setBondDir(BondEnums::BondDir::NONE);
@@ -443,7 +446,7 @@ bool kekulizeWorker(RDMol &mol, const INT_VECT &allAtms,
         }
 
       }  // end of adding a double bond
-      else if (mol.getAtom(atomindex_t(curr)).getAtomicNum()) {
+      else if (atomVec[curr].getAtomicNum()) {
         // we have a non-dummy atom that should be getting a double
         // bond but none of the neighbors can take one. Most likely
         // because of a wrong choice earlier so back track
@@ -453,10 +456,10 @@ bool kekulizeWorker(RDMol &mol, const INT_VECT &allAtms,
         } else {
           // undo any remaining changes we made while here
           // this was github #962
-          for (uint32_t bidx = 0, nbnds = mol.getNumBonds(); bidx < nbnds;
+          for (uint32_t bidx = 0, nbnds = uint32_t(bondVec.size()); bidx < nbnds;
                ++bidx) {
             if (localBondsAdded[bidx]) {
-              mol.getBond(bidx).setBondType(BondEnums::BondType::SINGLE);
+              bondVec[bidx].setBondType(BondEnums::BondType::SINGLE);
             }
           }
           return false;
@@ -612,13 +615,14 @@ void KekulizeFragment(RDMol &mol, const boost::dynamic_bitset<> &atomsToUse,
   const uint32_t numAtoms = mol.getNumAtoms();
   INT_VECT valences(numAtoms);
   boost::dynamic_bitset<> dummyAts(numAtoms);
+  const auto &atomVec = mol.getAtomDataVector();
 
   for (uint32_t atomIdx = 0; atomIdx < numAtoms; ++atomIdx) {
     if (!atomsToUse[atomIdx]) {
       continue;
     }
     mol.calcAtomImplicitValence(atomIdx, false);
-    const AtomData &atom = mol.getAtom(atomIdx);
+    const AtomData &atom = atomVec[atomIdx];
     valences[atomIdx] =
         int(atom.getValence(AtomData::ValenceType::EXPLICIT) +
             atom.getValence(AtomData::ValenceType::IMPLICIT));
@@ -830,7 +834,7 @@ void KekulizeFragment(RDMol &mol, const boost::dynamic_bitset<> &atomsToUse,
     if (!atomsToUse[atomIdx]) {
       continue;
     }
-    const AtomData &atom = mol.getAtom(atomIdx);
+    const AtomData &atom = atomVec[atomIdx];
     const int val = int(atom.getValence(AtomData::ValenceType::EXPLICIT) +
                         atom.getValence(AtomData::ValenceType::IMPLICIT));
     if (val != valences[atomIdx]) {

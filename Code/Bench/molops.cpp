@@ -585,6 +585,7 @@ BENCH_OPS_FOR(Dataset::Rings_6, "rings 6", "[rings_6]")
               MolOps::adjustHs(mol), mol.getNumAtoms(), DATASET, SUFFIX, TAG)
 
 BENCH_STAGE_FOR_BUCKETS(Dataset::Size_00_20, "size 00-20", "[size_00_20]")
+BENCH_STAGE_FOR_BUCKETS(Dataset::Size_20_40, "size 20-40", "[size_20_40]")
 BENCH_STAGE_FOR_BUCKETS(Dataset::Size_40_60, "size 40-60", "[size_40_60]")
 BENCH_STAGE_FOR_BUCKETS(Dataset::Size_60_80, "size 60-80", "[size_60_80]")
 BENCH_STAGE_FOR_BUCKETS(Dataset::Rings_4, "rings 4", "[rings_4]")

@@ -46,7 +46,9 @@ bool isAtomConjugCand(const RDMol &mol, std::uint32_t atomIdx,
 }
 
 void markConjAtomBonds(RDMol &mol, std::uint32_t atomIdx) {
-  const AtomData &at = mol.getAtom(atomIdx);
+  const auto &atomVec = mol.getAtomDataVector();
+  auto &bondVec = mol.getBondDataVector();
+  const AtomData &at = atomVec[atomIdx];
   if (!isAtomConjugCand(mol, atomIdx, at)) {
     return;
   }
@@ -59,10 +61,10 @@ void markConjAtomBonds(RDMol &mol, std::uint32_t atomIdx) {
   auto [beg1, end1] = mol.getAtomBonds(atomIdx);
   for (; beg1 != end1; ++beg1) {
     uint32_t bondIdx = *beg1;
-    BondData &bnd1 = mol.getBond(bondIdx);
+    BondData &bnd1 = bondVec[bondIdx];
+    const atomindex_t otherIdx1 = bnd1.getOtherAtomIdx(atomIdx);
     if (bnd1.getTwiceValenceContrib(atomIdx) < 3 ||
-        !isAtomConjugCand(mol, bnd1.getOtherAtomIdx(atomIdx),
-                          mol.getAtom(bnd1.getOtherAtomIdx(atomIdx)))) {
+        !isAtomConjugCand(mol, otherIdx1, atomVec[otherIdx1])) {
       continue;
     }
     auto [beg2, end2] = mol.getAtomBonds(atomIdx);
@@ -70,14 +72,13 @@ void markConjAtomBonds(RDMol &mol, std::uint32_t atomIdx) {
       if (beg1 == beg2) {
         continue;
       }
-      BondData &bnd2 = mol.getBond(*beg2);
+      BondData &bnd2 = bondVec[*beg2];
       auto atomIdx2 = bnd2.getOtherAtomIdx(atomIdx);
-      auto at2 = mol.getAtom(atomIdx2);
       sbo = mol.getAtomTotalDegree(atomIdx2);
       if (sbo > 3) {
         continue;
       }
-      if (isAtomConjugCand(mol, atomIdx2, at2)) {
+      if (isAtomConjugCand(mol, atomIdx2, atomVec[atomIdx2])) {
         bnd1.setIsConjugated(true);
         bnd2.setIsConjugated(true);
       }
@@ -89,10 +90,10 @@ int numBondsPlusLonePairs(const RDMol &mol, std::uint32_t atomIdx,
                           const AtomData &atom) {
   int deg = mol.getAtomTotalDegree(atomIdx);
 
+  const auto &bondVec = mol.getBondDataVector();
   auto [beg, end] = mol.getAtomBonds(atomIdx);
   for (; beg != end; ++beg) {
-    uint32_t bondIdx = *beg;
-    const BondData &bond = mol.getBond(bondIdx);
+    const BondData &bond = bondVec[*beg];
     if (bond.getBondType() == BondEnums::BondType::ZERO ||
         (isDative(bond.getBondType()) && atomIdx != bond.getEndAtomIdx())) {
       --deg;
@@ -133,11 +134,10 @@ bool atomHasConjugatedBond(const Atom *at) {
   return false;
 }
 bool atomHasConjugatedBond(const RDMol &mol, std::uint32_t atomIdx) {
+  const auto &bondVec = mol.getBondDataVector();
   auto [beg, end] = mol.getAtomBonds(atomIdx);
   for (; beg != end; ++beg) {
-    uint32_t bondIdx = *beg;
-    const BondData &bnd = mol.getBond(bondIdx);
-    if (bnd.getIsConjugated()) {
+    if (bondVec[*beg].getIsConjugated()) {
       return true;
     }
   }
@@ -163,9 +163,10 @@ void setConjugation(RDMol &mol) {
 void setConjugation(ROMol &mol) { setConjugation(mol.asRDMol()); }
 
 void setHybridization(RDMol &mol) {
-  for (uint32_t atomIdx = 0, numAtoms = mol.getNumAtoms(); atomIdx < numAtoms;
-       ++atomIdx) {
-    auto &atom = mol.getAtom(atomIdx);
+  auto &atomVec = mol.getAtomDataVector();
+  for (uint32_t atomIdx = 0, numAtoms = uint32_t(atomVec.size());
+       atomIdx < numAtoms; ++atomIdx) {
+    AtomData &atom = atomVec[atomIdx];
     if (atom.getAtomicNum() == 0) {
       atom.setHybridization(AtomEnums::HybridizationType::UNSPECIFIED);
     } else {

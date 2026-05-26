@@ -2,9 +2,9 @@
 
 Buckets: [1, 20], [21, 40], [41, 60], [61, 80] heavy atoms.
 
-Primary source: ChEMBL 35 processed SMILES at $CHEMBL35_SMI (default
-~/data/chembl35_processed.smi). ChEMBL has ample coverage across every
-bucket including 60-80 (peptides, natural products).
+Primary source: ChEMBL 35 processed SMILES at $CHEMBL35_SMI when set.
+ChEMBL has ample coverage across every bucket including 60-80 (peptides,
+natural products).
 
 Fallback chain when the primary source is unavailable: znp.50k.smi.gz +
 canonSmiles.long.smi (in-repo). These cover 0-60 well; for 60-80 the
@@ -116,7 +116,7 @@ def main() -> int:
         primary_iter = lambda: iter_smi(chembl)
     else:
         print(
-            "warning: ~/data/chembl35_processed.smi not found; falling back to "
+            "warning: $CHEMBL35_SMI not set or path missing; falling back to "
             "in-repo corpora (may be sparse for 60-80 bucket)",
             file=sys.stderr,
         )

@@ -279,16 +279,18 @@ void markAtomsBondsArom(RDMol& mol, const INT_VECT &ringIds,
   }
   // now mark single or double bonds that have a count of 1 and the atoms they
   // connect as aromatic
+  auto &atomVec = mol.getAtomDataVector();
+  auto &bondVec = mol.getBondDataVector();
   for (const auto &bci : bndCntr) {
     if (bci.second == 1) {
-      auto &bond = mol.getBond(bci.first);
+      auto &bond = bondVec[bci.first];
       bond.setIsAromatic(true);
       switch (bond.getBondType()) {
         case BondEnums::SINGLE:
         case BondEnums::DOUBLE:
           bond.setBondType(BondEnums::AROMATIC);
-          mol.getAtom(bond.getBeginAtomIdx()).setIsAromatic(true);
-          mol.getAtom(bond.getEndAtomIdx()).setIsAromatic(true);
+          atomVec[bond.getBeginAtomIdx()].setIsAromatic(true);
+          atomVec[bond.getEndAtomIdx()].setIsAromatic(true);
           break;
         default:
           break;
@@ -869,10 +871,10 @@ bool isAtomCandForArom(const ConstRDMolAtom& at, const ElectronDonorType edon,
   if (nUnsaturations > 1) {
     unsigned int nMult = 0;
     const auto &mol = at.mol();
+    const auto &bondVec = mol.getBondDataVector();
     auto [bnd_begin, bnd_end] = mol.getAtomBonds(at.index());
     for (; bnd_begin != bnd_end; ++bnd_begin) {
-      uint32_t bondIdx = *bnd_begin;
-      const BondData &bond = mol.getBond(bondIdx);
+      const BondData &bond = bondVec[*bnd_begin];
       switch (bond.getBondType()) {
         case BondEnums::SINGLE:
         case BondEnums::AROMATIC:
@@ -903,10 +905,11 @@ bool isAtomCandForArom(const ConstRDMolAtom& at, const ElectronDonorType edon,
 
   if (!allowExocyclicMultipleBonds) {
     const auto &mol = at.mol();
+    const auto &bondVec = mol.getBondDataVector();
     auto [bnd_begin, bnd_end] = mol.getAtomBonds(at.index());
     for (; bnd_begin != bnd_end; ++bnd_begin) {
-      uint32_t bondIdx = *bnd_begin;
-      const BondData &bond = mol.getBond(bondIdx);
+      const uint32_t bondIdx = *bnd_begin;
+      const BondData &bond = bondVec[bondIdx];
       if ((bond.getBondType() == BondEnums::DOUBLE ||
            bond.getBondType() == BondEnums::TRIPLE) &&
           !queryIsBondInRing2(ConstRDMolBond(&mol, bondIdx))) {
@@ -997,6 +1000,7 @@ ElectronDonorType getAtomDonorTypeArom(
 ElectronDonorType getAtomDonorTypeArom(
     const RDMolAtom& at, bool exocyclicBondsStealElectrons = true) {
   const auto &mol = at.mol();
+  const auto &atomVec = mol.getAtomDataVector();
   if (at.data().getAtomicNum() == 0) {
     return incidentCyclicMultipleBond(at) ? OneElectronDonorType
                                           : AnyElectronDonorType;
@@ -1028,7 +1032,7 @@ ElectronDonorType getAtomDonorTypeArom(
       // external multiple bond this electron will not be available
       // for aromaticity if this atom is bonded to a more electro
       // negative atom
-      const auto at2 = mol.getAtom(who);
+      const auto &at2 = atomVec[who];
       if (exocyclicBondsStealElectrons &&
           PeriodicTable::getTable()->moreElectroNegative(at2.getAtomicNum(),
                                                          at.data().getAtomicNum())) {
@@ -1052,7 +1056,7 @@ ElectronDonorType getAtomDonorTypeArom(
       // if there is an incident multiple bond with an element that
       // is more electronegative than the this atom, count one less
       // electron
-      const auto at2 = mol.getAtom(who);
+      const auto &at2 = atomVec[who];
       if (exocyclicBondsStealElectrons &&
           PeriodicTable::getTable()->moreElectroNegative(at2.getAtomicNum(),
                                                          at.data().getAtomicNum())) {
@@ -1327,6 +1331,7 @@ int mdlAromaticityHelper(RDMol &mol, const RingInfoCache &ringInfo) {
 
   INT_VECT cRings;  // holder for rings that are candidates for aromaticity
   const std::vector<uint32_t> &atomRings = ringInfo.atomsInRings;
+  const auto &atomVec = mol.getAtomDataVector();
   for (uint32_t ridx = 0; ridx < ringInfo.numRings(); ++ridx) {
     bool allAromatic = true;
     bool allDummy = true;
@@ -1334,7 +1339,7 @@ int mdlAromaticityHelper(RDMol &mol, const RingInfoCache &ringInfo) {
     const uint32_t ringEnd = ringInfo.ringBegins[ridx + 1];
     for (uint32_t idx = ringBegin; idx != ringEnd; ++idx) {
       const uint32_t firstIdx = atomRings[idx];
-      auto& at = mol.getAtom(firstIdx);
+      const AtomData &at = atomVec[firstIdx];
 
       if (allDummy && at.getAtomicNum() != 0) {
         allDummy = false;
@@ -1473,14 +1478,14 @@ int mmff94AromaticityHelper(RDMol &mol, const RingInfoCache &ringInfo) {
 
   // count aromatic rings for return value
   int narom = 1;
+  const auto &atomVec = mol.getAtomDataVector();
   for(uint32_t ridx = 0; ridx < ringInfo.numRings(); ++ridx) {
     bool isAromRing = true;
     const uint32_t ringBegin = ringInfo.ringBegins[ridx];
     const uint32_t ringEnd = ringInfo.ringBegins[ridx + 1];
     for (uint32_t idx = ringBegin; idx != ringEnd; ++idx) {
       const uint32_t aid = ringInfo.atomsInRings[idx];
-      auto& atom = mol.getAtom(aid);
-      if (!atom.getIsAromatic()) {
+      if (!atomVec[aid].getIsAromatic()) {
         isAromRing = false;
         break;
       }
@@ -1912,8 +1917,8 @@ void setMMFFAromaticity(RDMol &mol) {
   int old_nAromSet = -1;
   auto& ringInfo = mol.getRingInfo();
   auto &atomRings = ringInfo.atomsInRings;
-  ROMol::ADJ_ITER nbrIdx;
-  ROMol::ADJ_ITER endNbrs;
+  auto &atomVec = mol.getAtomDataVector();
+  auto &bondVec = mol.getBondDataVector();
   boost::dynamic_bitset<> aromBitVect(mol.getNumAtoms());
   boost::dynamic_bitset<> aromRingBitVect(atomRings.size());
 
@@ -1927,9 +1932,8 @@ void setMMFFAromaticity(RDMol &mol) {
       for (j = 0, pi_e = 0, moveToNextRing = false, isNOSinRing = false,
           exoDoubleBond = false;
            (!moveToNextRing) && (j < ringSize); ++j) {
-        // auto atom = mol.getAtomWithIdx(atomRings[i][j]);
         const uint32_t atomIdx = atomRings[ringBegin + j];
-        auto& atom = mol.getAtom(atomIdx);
+        const AtomData &atom = atomVec[atomIdx];
         // remember if this atom is nitrogen, oxygen or divalent sulfur
         if ((atom.getAtomicNum() == 7) || (atom.getAtomicNum() == 8) ||
             ((atom.getAtomicNum() == 16) && (mol.getAtomDegree(atomIdx) == 2))) {
@@ -1940,15 +1944,13 @@ void setMMFFAromaticity(RDMol &mol) {
         nextInRing = (j == (ringSize - 1)) ? atomRings[ringBegin+0]
                                                       : atomRings[ringBegin + j + 1];
 
-        if (mol.getBond(mol.getBondIndexBetweenAtoms(atomRings[ringBegin + j],
-                                                     nextInRing))
+        if (bondVec[mol.getBondIndexBetweenAtoms(atomIdx, nextInRing)]
             .getBondType() == BondEnums::DOUBLE) {
           pi_e += 2;
         }
         // if this is not a double bond, check whether this is carbon
         // or nitrogen with total bond order = 4
         else {
-          auto& atom = mol.getAtom(atomRings[ringBegin + j]);
           // if not, move on
           if ((atom.getAtomicNum() != 6) &&
               (!((atom.getAtomicNum() == 7) &&
@@ -1957,9 +1959,9 @@ void setMMFFAromaticity(RDMol &mol) {
             continue;
           }
           // loop over neighbors
-          auto [nbrIdx, endNbrs] = mol.getAtomNeighbors(atomRings[ringBegin + j]);
+          auto [nbrIdx, endNbrs] = mol.getAtomNeighbors(atomIdx);
           for (; nbrIdx != endNbrs; ++nbrIdx) {
-            auto& nbrAtom = mol.getAtom(*nbrIdx);
+            const AtomData &nbrAtom = atomVec[*nbrIdx];
             // if the neighbor is one of the ring atoms, skip it
             // since we are looking for exocyclic neighbors
             if (std::find(&atomRings[ringBegin], &atomRings[ringBegin+ringSize],
@@ -1967,7 +1969,7 @@ void setMMFFAromaticity(RDMol &mol) {
               continue;
             }
             // it the neighbor is single-bonded, skip it
-            if (mol.getBond(mol.getBondIndexBetweenAtoms(atomRings[ringBegin+j], *nbrIdx))
+            if (bondVec[mol.getBondIndexBetweenAtoms(atomIdx, *nbrIdx)]
                     .getBondType() == BondEnums::SINGLE) {
               continue;
             }
@@ -1981,7 +1983,7 @@ void setMMFFAromaticity(RDMol &mol) {
             }
             // if the neighbor is in an aromatic ring and is
             // double-bonded to the current atom, add 1 pi electron
-            if (mol.getBond(mol.getBondIndexBetweenAtoms(atomRings[ringBegin + j], *nbrIdx))
+            if (bondVec[mol.getBondIndexBetweenAtoms(atomIdx, *nbrIdx)]
                     .getBondType() == BondEnums::DOUBLE) {
               if (nbrAtom.getIsAromatic()) {
                 ++pi_e;
@@ -2001,7 +2003,7 @@ void setMMFFAromaticity(RDMol &mol) {
       for (j = 0, canBeAromatic = true; j < ringSize; ++j) {
         // set aromaticity as perceived
         aromBitVect[atomRings[ringBegin + j]] = 1;
-        auto& atom = mol.getAtom(atomRings[ringBegin + j]);
+        const AtomData &atom = atomVec[atomRings[ringBegin + j]];
         // if this is is a non-sp2 carbon or nitrogen
         // then this ring can't be aromatic
         if (((atom.getAtomicNum() == 6) || (atom.getAtomicNum() == 7)) &&
@@ -2023,8 +2025,7 @@ void setMMFFAromaticity(RDMol &mol) {
       if ((pi_e > 2) && (!((pi_e - 2) % 4))) {
         aromRingBitVect[i] = 1;
         for (j = 0; j < ringSize; ++j) {
-          auto& atom = mol.getAtom(atomRings[ringBegin +j]);
-          atom.setIsAromatic(true);
+          atomVec[atomRings[ringBegin + j]].setIsAromatic(true);
         }
       }
     }
@@ -2059,7 +2060,9 @@ void setMMFFAromaticity(RDMol &mol) {
       // mark all ring bonds as aromatic
       nextInRing = (j == (ringSize - 1)) ? atomRings[ringBegin + 0]
                                                     : atomRings[ringBegin + j + 1];
-      auto& bond = mol.getBond(mol.getBondIndexBetweenAtoms(atomRings[ringBegin + j], nextInRing));
+      auto &bond =
+          bondVec[mol.getBondIndexBetweenAtoms(atomRings[ringBegin + j],
+                                               nextInRing)];
       bond.setBondType(BondEnums::AROMATIC);
       bond.setIsAromatic(true);
     }
@@ -2074,13 +2077,14 @@ void setMMFFAromaticity(RDMol &mol) {
       continue;
     }
     for (j = 0; j < ringSize; ++j) {
-      auto& atom = mol.getAtom(atomRings[ringBegin + j]);
+      const uint32_t atomIdx = atomRings[ringBegin + j];
+      AtomData &atom = atomVec[atomIdx];
       if (atom.getAtomicNum() != 6) {
-        int iv = mol.calcAtomImplicitValence(atomRings[ringBegin + j] ,false);
-        mol.calcAtomExplicitValence(atomRings[ringBegin + j] ,false);
+        int iv = mol.calcAtomImplicitValence(atomIdx, false);
+        mol.calcAtomExplicitValence(atomIdx, false);
         if (iv) {
           atom.setNumExplicitHs(iv);
-          mol.calcAtomImplicitValence(atomRings[ringBegin + j] ,false);
+          mol.calcAtomImplicitValence(atomIdx, false);
         }
       }
     }

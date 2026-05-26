@@ -91,13 +91,14 @@ void nitrogensCleanup(RDMol &mol) {
     auto aromHolder = atom.getIsAromatic();
     atom.setIsAromatic(false);
     bool updateNeeded = false;
+    auto &bondVec = mol.getBondDataVector();
     auto [nbrBegin, nbrEnd] = mol.getAtomNeighbors(aid);
     for (auto nbrIt = nbrBegin; nbrIt != nbrEnd; ++nbrIt) {
       uint32_t nbrIdx = *nbrIt;
       AtomData &nbr = atomVec[nbrIdx];
       if (nbr.getAtomicNum() == 8 && nbr.getFormalCharge() == 0) {
         uint32_t bondIdx = mol.getBondIndexBetweenAtoms(aid, nbrIdx);
-        BondData &bond = mol.getBond(bondIdx);
+        BondData &bond = bondVec[bondIdx];
         if (bond.getBondType() == BondEnums::BondType::DOUBLE) {
           // here's the double bonded oxygen
           bond.setBondType(BondEnums::BondType::SINGLE);
@@ -116,6 +117,7 @@ void nitrogensCleanup(RDMol &mol) {
   }
 
   // now repeat for the weird N#N case:
+  auto &bondVec = mol.getBondDataVector();
   for (auto aid = nitrogensToConsider.find_first();
        aid != boost::dynamic_bitset<>::npos;
        aid = nitrogensToConsider.find_next(aid)) {
@@ -130,7 +132,7 @@ void nitrogensCleanup(RDMol &mol) {
       if (nbr.getAtomicNum() == 7 && nbr.getFormalCharge() == 0) {
         uint32_t bondIdx =
             mol.getBondIndexBetweenAtoms(uint32_t(aid), nbrIdx);
-        BondData &bond = mol.getBond(bondIdx);
+        BondData &bond = bondVec[bondIdx];
         if (bond.getBondType() == BondEnums::BondType::TRIPLE) {
           // here's the triple bonded nitrogen
           bond.setBondType(BondEnums::BondType::DOUBLE);
@@ -154,7 +156,9 @@ void phosphorusCleanup(RDMol &mol, atomindex_t aid) {
   // - neutral 5 coordinate Ps with one double bonds to an Os
   //   and one to a C or N to the zwitterionic form.  e.g.:
   //   C=P(=O)X -> C=[P+]([O-])X
-  AtomData &atom = mol.getAtom(aid);
+  auto &atomVec = mol.getAtomDataVector();
+  auto &bondVec = mol.getBondDataVector();
+  AtomData &atom = atomVec[aid];
 
   // we only want to do neutrals
   if (atom.getFormalCharge()) {
@@ -173,9 +177,9 @@ void phosphorusCleanup(RDMol &mol, atomindex_t aid) {
     auto [nbrBegin, nbrEnd] = mol.getAtomNeighbors(aid);
     for (auto nbrIt = nbrBegin; nbrIt != nbrEnd; ++nbrIt) {
       uint32_t nbrIdx = *nbrIt;
-      AtomData &nbr = mol.getAtom(nbrIdx);
+      const AtomData &nbr = atomVec[nbrIdx];
       uint32_t bondIdx = mol.getBondIndexBetweenAtoms(aid, nbrIdx);
-      BondData &bond = mol.getBond(bondIdx);
+      const BondData &bond = bondVec[bondIdx];
       if (nbr.getAtomicNum() == 8 && nbr.getFormalCharge() == 0 &&
           bond.getBondType() == BondEnums::BondType::DOUBLE) {
         // here's the double bonded oxygen
@@ -189,8 +193,8 @@ void phosphorusCleanup(RDMol &mol, atomindex_t aid) {
     }
     if (hasDoubleToCorN && dblToO != std::numeric_limits<uint32_t>::max()) {
       TEST_ASSERT(oAtomIdx != atomindex_t(-1));
-      mol.getAtom(oAtomIdx).setFormalCharge(-1);
-      mol.getBond(dblToO).setBondType(BondEnums::BondType::SINGLE);
+      atomVec[oAtomIdx].setFormalCharge(-1);
+      bondVec[dblToO].setBondType(BondEnums::BondType::SINGLE);
       atom.setFormalCharge(1);
     }
   }
@@ -203,13 +207,15 @@ void halogenCleanup(RDMol &mol, atomindex_t aid) {
   //    X(=O)(=O)(=O)O -> [X+3]([O-])([O-])([O-])O
   //    X(=O)(=O)O -> [X+2]([O-])([O-])O
   //    X(=O)O -> [X+]([O-])O
-  AtomData &atom = mol.getAtom(aid);
+  auto &atomVec = mol.getAtomDataVector();
+  auto &bondVec = mol.getBondDataVector();
+  AtomData &atom = atomVec[aid];
   int ev = mol.calcAtomExplicitValence(aid, false);
   if (atom.getFormalCharge() == 0 && (ev == 7 || ev == 5 || ev == 3)) {
     bool neighborsAllO = true;
     auto [nbrBegin, nbrEnd] = mol.getAtomNeighbors(aid);
     for (auto nbrIt = nbrBegin; nbrIt != nbrEnd; ++nbrIt) {
-      if (mol.getAtom(*nbrIt).getAtomicNum() != 8) {
+      if (atomVec[*nbrIt].getAtomicNum() != 8) {
         neighborsAllO = false;
         break;
       }
@@ -218,12 +224,12 @@ void halogenCleanup(RDMol &mol, atomindex_t aid) {
       int formalCharge = 0;
       auto [bondBegin, bondEnd] = mol.getAtomBonds(aid);
       for (auto bondIt = bondBegin; bondIt != bondEnd; ++bondIt) {
-        BondData &bond = mol.getBond(*bondIt);
+        BondData &bond = bondVec[*bondIt];
         if (bond.getBondType() == BondEnums::BondType::DOUBLE) {
           bond.setBondType(BondEnums::BondType::SINGLE);
           atomindex_t otherIdx = bond.getOtherAtomIdx(aid);
           formalCharge++;
-          mol.getAtom(otherIdx).setFormalCharge(-1);
+          atomVec[otherIdx].setFormalCharge(-1);
           mol.calcAtomExplicitValence(otherIdx, false);
         }
       }
@@ -328,7 +334,7 @@ void metalBondCleanup(RDMol &mol, atomindex_t atomIdx,
       auto bondIdx =
           mol.getBondIndexBetweenAtoms(atom.index(), metals.front().index());
       if (bondIdx != std::numeric_limits<std::uint32_t>::max()) {
-        auto &bond = mol.getBond(bondIdx);
+        auto &bond = mol.getBondDataVector()[bondIdx];
         bond.setBondType(BondEnums::BondType::DATIVE);
         bond.setBeginAtomIdx(atom.index());
         bond.setEndAtomIdx(metals.front().index());
@@ -423,9 +429,10 @@ void adjustHs(RDMol &mol) {
   //  sanitized, aromaticity has been perceived, and the implicit
   //  valence of everything has been calculated.
   //
-  for (uint32_t atomIdx = 0, numAtoms = mol.getNumAtoms(); atomIdx < numAtoms;
-       ++atomIdx) {
-    AtomData &atom = mol.getAtom(atomIdx);
+  auto &atomVec = mol.getAtomDataVector();
+  for (uint32_t atomIdx = 0, numAtoms = uint32_t(atomVec.size());
+       atomIdx < numAtoms; ++atomIdx) {
+    AtomData &atom = atomVec[atomIdx];
     int origImplicitV = atom.getValence(AtomData::ValenceType::IMPLICIT);
     mol.calcAtomExplicitValence(atomIdx, false);
     int origExplicitV = atom.getNumExplicitHs();
@@ -473,9 +480,10 @@ void assignRadicals(RDMol &mol) {
         PeriodicTable::getTable()->getNouterElecs(atom.getAtomicNum());
     if (valens.size() != 1 || valens[0] != -1) {
       double accum = 0.0;
+      const auto &bondVec = mol.getBondDataVector();
       auto [beg, end] = mol.getAtomBonds(atomIdx);
       for (; beg != end; ++beg) {
-        accum += mol.getBond(*beg).getValenceContrib(atomIdx);
+        accum += bondVec[*beg].getValenceContrib(atomIdx);
       }
       accum += atom.getNumExplicitHs();
       int totalValence = static_cast<int>(accum + 0.1);
@@ -537,10 +545,10 @@ MolOps::Hybridizations::Hybridizations(const RDMol &mol) {
     return;
   }
 
+  const auto &atomVec = mol.getAtomDataVector();
   // If the mol already has hybridizations computed, just snapshot them.
-  if (mol.getAtom(0).getHybridization() !=
+  if (atomVec.front().getHybridization() !=
       AtomEnums::HybridizationType::UNSPECIFIED) {
-    const auto &atomVec = mol.getAtomDataVector();
     d_hybridizations.reserve(atomVec.size());
     for (const auto &atom : atomVec) {
       d_hybridizations.push_back(static_cast<int>(atom.getHybridization()));
@@ -578,7 +586,7 @@ bool checkBond(RDMol &mol, uint32_t bondIdx, MolOps::Hybridizations &hybs) {
     RDKit::MolOps::findSSSR(mol, mol.getRingInfo());
   }
   const RingInfoCache &ri = mol.getRingInfo();
-  BondData &bond = mol.getBond(bondIdx);
+  BondData &bond = mol.getBondDataVector()[bondIdx];
   if (hybs[bond.getBeginAtomIdx()] != AtomEnums::HybridizationType::SP2 ||
       hybs[bond.getEndAtomIdx()] != AtomEnums::HybridizationType::SP2 ||
       // do not clear bonds that are part of a macrocycle: those bonds may

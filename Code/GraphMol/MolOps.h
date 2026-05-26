@@ -242,6 +242,9 @@ struct RDKIT_GRAPHMOL_EXPORT AddHsParameters {
    heavy atoms don't already have coordinates.
        - the molecule is modified
  */
+RDKIT_GRAPHMOL_EXPORT void addHs(RDMol &mol, const AddHsParameters &params,
+                                 const UINT_VECT *onlyOnAtoms = nullptr);
+//! \overload
 RDKIT_GRAPHMOL_EXPORT void addHs(RWMol &mol, const AddHsParameters &params,
                                  const UINT_VECT *onlyOnAtoms = nullptr);
 
