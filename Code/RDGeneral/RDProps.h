@@ -1,3 +1,6 @@
+//  Copyright (C) 2016-2026 Brian Kelley and other RDKit contributors
+//   @@ All Rights Reserved @@
+//
 //  This file is part of the RDKit.
 //  The contents are covered by the terms of the BSD license
 //  which is included in the file license.txt, found at the root
@@ -75,6 +78,9 @@ class RDProps {
   //! \overload
   template <typename T>
   void setProp(const std::string_view key, T val, bool computed = false) const {
+    if(key.empty()) {
+      throw ValueErrorException("Cannot set property with empty key");
+    }
     if (computed) {
       STR_VECT compLst;
       getPropIfPresent(RDKit::detail::computedPropName, compLst);
@@ -112,6 +118,10 @@ class RDProps {
   template <typename T>
   T getProp(const std::string_view key) const {
     return d_props.getVal<T>(key);
+  }
+
+  const RDValue &getPropRDValue(const std::string_view &key) const {
+    return d_props.getRDValue(key);
   }
 
   //! returns whether or not we have a \c property with name \c key

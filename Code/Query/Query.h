@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2003-2020 Greg Landrum and Rational Discovery LLC
+// Copyright (c) 2003-2026 Greg Landrum and other RDKit contributors
 //
 //   @@ All Rights Reserved @@
 //  This file is part of the RDKit.
@@ -17,14 +17,24 @@
 
 #include <vector>
 #include <string>
+#include <functional>
 #include <RDGeneral/Invariant.h>
+
+namespace RDKit {
+class Atom;
+class Bond;
+class ConstRDMolAtom;
+class ConstRDMolBond;
+}
 
 namespace Queries {
 
 //! class to allow integer values to pick templates
 template <int v>
 class Int2Type {
-  enum { value = v };
+  enum {
+    value = v
+  };
 };
 
 //! Base class for all queries
@@ -52,11 +62,24 @@ class RDKIT_QUERY_EXPORT Query {
   using MATCH_FUNC_ARG_TYPE = MatchFuncArgType;
   using DATA_FUNC_ARG_TYPE = DataFuncArgType;
 
+  constexpr static bool IS_ATOM =
+      std::is_same_v<DataFuncArgType, const RDKit::Atom *> ||
+      std::is_same_v<DataFuncArgType, RDKit::ConstRDMolAtom>;
+  constexpr static bool IS_COMPAT =
+      std::is_same_v<DataFuncArgType, const RDKit::Atom *> ||
+      std::is_same_v<DataFuncArgType, const RDKit::Bond *>;
+
+  using INNER_ARG_TYPE = std::conditional_t<
+      IS_COMPAT,
+      std::conditional_t<IS_ATOM, RDKit::ConstRDMolAtom, RDKit::ConstRDMolBond>,
+      std::conditional_t<IS_ATOM, const RDKit::Atom *, const RDKit::Bond *>>;
+  using INNER_TYPE = Query<MatchFuncArgType, INNER_ARG_TYPE, needsConversion>;
+
   Query() : d_matchFunc(nullptr), d_dataFunc(nullptr) {}
   virtual ~Query() { this->d_children.clear(); }
 
   //! sets whether or not we are negated
-  void setNegation(bool what) { this->df_negate = what; }
+  virtual void setNegation(bool what) { this->df_negate = what; }
   //! returns whether or not we are negated
   bool getNegation() const { return this->df_negate; }
 
@@ -85,22 +108,24 @@ class RDKIT_QUERY_EXPORT Query {
   const std::string &getTypeLabel() const { return this->d_queryType; }
 
   //! sets our match function
-  void setMatchFunc(bool (*what)(MatchFuncArgType)) {
+  void setMatchFunc(std::function<bool(MatchFuncArgType)> what) {
     this->d_matchFunc = what;
   }
   //! returns our match function:
-  bool (*getMatchFunc() const)(MatchFuncArgType) { return this->d_matchFunc; }
+  std::function<bool(MatchFuncArgType)> getMatchFunc() const {
+    return this->d_matchFunc;
+  }
   //! sets our data function
-  void setDataFunc(MatchFuncArgType (*what)(DataFuncArgType)) {
+  void setDataFunc(std::function<MatchFuncArgType(DataFuncArgType)> what) {
     this->d_dataFunc = what;
   }
   //! returns our data function:
-  MatchFuncArgType (*getDataFunc() const)(DataFuncArgType) {
+  std::function<MatchFuncArgType(DataFuncArgType)> getDataFunc() const {
     return this->d_dataFunc;
   }
 
   //! adds a child to our list of children
-  void addChild(CHILD_TYPE child) { this->d_children.push_back(child); }
+  virtual void addChild(CHILD_TYPE child) { this->d_children.push_back(child); }
   //! returns an iterator for the beginning of our child vector
   CHILD_VECT_CI beginChildren() const { return this->d_children.begin(); }
   //! returns an iterator for the end of our child vector
@@ -146,6 +171,8 @@ class RDKIT_QUERY_EXPORT Query {
     return res;
   }
 
+  virtual const INNER_TYPE *getInnerQuery() const { return nullptr; }
+
  protected:
   MatchFuncArgType d_val = 0;
   MatchFuncArgType d_tol = 0;
@@ -153,7 +180,7 @@ class RDKIT_QUERY_EXPORT Query {
   std::string d_queryType = "";
   CHILD_VECT d_children;
   bool df_negate{false};
-  bool (*d_matchFunc)(MatchFuncArgType);
+  std::function<bool(MatchFuncArgType)> d_matchFunc;
 
   // MSVC complains at compile time when TypeConvert(MatchFuncArgType what,
   // Int2Type<false>) attempts to pass what (which is of type MatchFuncArgType)
@@ -161,8 +188,8 @@ class RDKIT_QUERY_EXPORT Query {
   // union is but a trick to avoid silly casts and keep MSVC happy when building
   // DLLs
   union {
-    MatchFuncArgType (*d_dataFunc)(DataFuncArgType);
-    MatchFuncArgType (*d_dataFuncSameType)(MatchFuncArgType);
+    std::function<MatchFuncArgType(DataFuncArgType)> d_dataFunc;
+    std::function<MatchFuncArgType(MatchFuncArgType)> d_dataFuncSameType;
   };
   //! \brief calls our \c dataFunc (if it's set) on \c what and returns
   //! the result, otherwise returns \c what
@@ -205,6 +232,14 @@ int queryCmp(const T1 v1, const T2 v2, const T1 tol) {
   } else {
     return 1;
   }
-};
+}
+
+template <>
+inline int queryCmp(const bool v1, const bool v2, const bool tol) {
+  if (v1 == v2 || tol) {
+    return 0;
+  }
+  return v1 ? 1 : -1;
+}
 }  // namespace Queries
 #endif
