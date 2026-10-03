@@ -551,6 +551,17 @@ void addHs(RWMol &mol, const AddHsParameters &params,
   }
   std::vector<unsigned int> numExplicitHs(mol.getNumAtoms(), 0);
   std::vector<unsigned int> numImplicitHs(mol.getNumAtoms(), 0);
+
+  // Ensure all atoms have implicit valence calculated (e.g., after unpickling)
+  // If noImplicit is false, the atom may need implicit valence calculated
+  // Skip query atoms (or atoms connected to query bonds) as they are handled separately
+  for (auto at : mol.atoms()) {
+    if (!at->getNoImplicit() && !isQueryAtom(mol, *at)) {
+      at->updatePropertyCache(false);
+    }
+  }
+
+  // Cache H counts before adding bonds (which will clear property cache per #8934)
   for (auto at : mol.atoms()) {
     numExplicitHs[at->getIdx()] = at->getNumExplicitHs();
     numImplicitHs[at->getIdx()] = at->getNumImplicitHs();
@@ -559,6 +570,7 @@ void addHs(RWMol &mol, const AddHsParameters &params,
         onAtoms.set(at->getIdx(), 0);
         continue;
       }
+      
       numAddHyds += at->getNumExplicitHs();
       if (!params.explicitOnly) {
         numAddHyds += at->getNumImplicitHs();
@@ -722,7 +734,7 @@ void molRemoveH(RWMol &mol, unsigned int idx, bool updateExplicitCount) {
           PeriodicTable::getTable()->getValenceList(heavyAtomNum);
       if (((heavyAtomNum == 7 || heavyAtomNum == 15 ||
             may_need_extra_H(mol, heavyAtom)) &&
-           heavyAtom->getIsAromatic()) ||
+           isAromaticAtom(*heavyAtom)) ||
           (std::find(defaultVs.begin() + 1, defaultVs.end(),
                      heavyAtom->getTotalValence()) != defaultVs.end())) {
         heavyAtom->setNumExplicitHs(heavyAtom->getNumExplicitHs() + 1);
@@ -1064,7 +1076,22 @@ void removeHs(RWMol &mol, const RemoveHsParameters &ps, bool sanitize) {
   if (!atomsToRemove.empty() && ps.removeNonimplicit && sanitize) {
     sanitizeMol(mol);
   }
-};
+
+  // if we removed Hs and any chiral atoms now have more than 1 explict H,
+  // remove those
+  if (!atomsToRemove.empty()) {
+    for (auto atom : mol.atoms()) {
+      if (!atom->getNoImplicit() &&
+          atom->getChiralTag() != Atom::CHI_UNSPECIFIED) {
+        unsigned int numExplicitHs = atom->getNumExplicitHs();
+        if (numExplicitHs > 1) {
+          atom->setNumExplicitHs(0);
+          atom->updatePropertyCache(false);
+        }
+      }
+    }
+  }
+}
 ROMol *removeHs(const ROMol &mol, const RemoveHsParameters &ps, bool sanitize) {
   auto *res = new RWMol(mol);
   try {

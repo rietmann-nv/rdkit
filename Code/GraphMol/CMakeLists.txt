@@ -1,6 +1,6 @@
 rdkit_library(GraphMol
         Atom.cpp QueryAtom.cpp QueryBond.cpp Bond.cpp
-        MolOps.cpp FindRings.cpp ROMol.cpp RWMol.cpp PeriodicTable.cpp
+        MolOps.cpp FindRings.cpp RDMol.cpp ROMol.cpp RWMol.cpp PeriodicTable.cpp
         atomic_data.cpp QueryOps.cpp MolPickler.cpp Canon.cpp
         AtomIterators.cpp BondIterators.cpp Aromaticity.cpp Kekulize.cpp
         ConjugHybrid.cpp AddHs.cpp
@@ -8,15 +8,14 @@ rdkit_library(GraphMol
         Renumber.cpp AdjustQuery.cpp Resonance.cpp StereoGroup.cpp
         new_canon.cpp SubstanceGroup.cpp FindStereo.cpp MonomerInfo.cpp
         NontetrahedralStereo.cpp Atropisomers.cpp
-        WedgeBonds.cpp MolProps.cpp 
+        WedgeBonds.cpp MolProps.cpp Subset.cpp
         SHARED
         LINK_LIBRARIES RDGeometryLib RDGeneral)
 target_compile_definitions(GraphMol PRIVATE RDKIT_GRAPHMOL_BUILD)
-if (RDK_USE_URF)
-    target_link_libraries(GraphMol PUBLIC ${RDK_URF_LIBS})
-    if (RDK_INSTALL_STATIC_LIBS AND NOT RDK_BUILD_STATIC_LIBS_ONLY)
+
+target_link_libraries(GraphMol PUBLIC ${RDK_URF_LIBS})
+if (RDK_INSTALL_STATIC_LIBS AND NOT RDK_BUILD_STATIC_LIBS_ONLY)
         target_link_libraries(GraphMol_static PUBLIC ${RDK_URF_LIBS}_static)
-    endif ()
 endif ()
 
 rdkit_headers(Atom.h
@@ -30,6 +29,8 @@ rdkit_headers(Atom.h
         Conformer.h
         details.h
         GraphMol.h
+        GraphMolEnums.h
+        GraphMolFwd.h
         MolOps.h
         MolPickler.h
         PeriodicTable.h
@@ -41,6 +42,7 @@ rdkit_headers(Atom.h
         Resonance.h
         RingInfo.h
         Rings.h
+        RDMol.h
         ROMol.h
         RWMol.h
         SanitException.h
@@ -49,6 +51,7 @@ rdkit_headers(Atom.h
         MonomerInfo.h
         new_canon.h
         MolBundle.h
+	Subset.h
         DEST GraphMol)
 
 add_subdirectory(SmilesParse)
@@ -77,6 +80,7 @@ add_subdirectory(MolAlign)
 add_subdirectory(MolChemicalFeatures)
 add_subdirectory(ShapeHelpers)
 add_subdirectory(MolCatalog)
+add_subdirectory(GaussianShape)
 
 add_subdirectory(MolDraw2D)
 
@@ -136,7 +140,7 @@ rdkit_test(graphmolcpTest cptest.cpp LINK_LIBRARIES SmilesParse GraphMol)
 
 rdkit_test(graphmolqueryTest querytest.cpp LINK_LIBRARIES SubstructMatch SmilesParse GraphMol)
 
-rdkit_test(graphmolMolOpsTest molopstest.cpp
+rdkit_catch_test(graphmolMolOpsTest molopstest.cpp
         LINK_LIBRARIES SubstructMatch FileParsers
         SmilesParse GraphMol)
 
@@ -204,3 +208,14 @@ rdkit_catch_test(tableTestsCatch catch_periodictable.cpp
 rdkit_catch_test(molopsTestsCatch catch_molops.cpp
         LINK_LIBRARIES FileParsers SmilesParse GraphMol)
 
+rdkit_catch_test(rdmolTestsCatch catch_rdmol.cpp
+        LINK_LIBRARIES SmilesParse GraphMol)
+
+rdkit_catch_test(romolcompatTestsCatch catch_romol_compat.cpp
+        LINK_LIBRARIES SmilesParse GraphMol)
+
+rdkit_catch_test(rwmolcompatTestsCatch catch_rwmol_compat.cpp
+        LINK_LIBRARIES SmilesParse GraphMol)
+
+rdkit_catch_test(stereoGroupsTestCatch catch_stereo_groups.cpp
+        LINK_LIBRARIES SmilesParse GraphMol)

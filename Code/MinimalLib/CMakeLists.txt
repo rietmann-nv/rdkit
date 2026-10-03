@@ -1,5 +1,4 @@
 include_directories(${RDKit_ExternalDir})
-include_directories(${RDKit_ExternalDir}/rapidjson/rapidjson-1.1.0/include)
 
 if(RDK_BUILD_MINIMAL_LIB)
     set(MINIMAL_LIB_LIBRARIES "MolInterchange;Abbreviations;"
@@ -62,9 +61,7 @@ if(RDK_BUILD_CFFI_LIB)
         add_definitions(-DRDK_BUILD_INCHI_SUPPORT)
         list(APPEND LIBS_TO_USE RDInchiLib)
     endif()
-    if(RDK_URF_LIBS)
-        list(APPEND LIBS_TO_USE RingDecomposerLib)
-    endif()
+    list(APPEND LIBS_TO_USE RingDecomposerLib)
     
     if(RDK_CFFI_STATIC AND ((NOT WIN32) OR (WIN32 AND RDK_INSTALL_DLLS_MSVC)))
         set(staticLibSuffix "_static")

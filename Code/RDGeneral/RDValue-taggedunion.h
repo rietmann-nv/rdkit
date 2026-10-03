@@ -262,6 +262,22 @@ struct RDValue {
   //  be wrapped in a container.
   // The idea is that POD types don't need to be destroyed
   //  and this allows the container optimization possibilities.
+  bool needsCleanup() const {
+    switch (type) {
+      case RDTypeTag::StringTag:
+      case RDTypeTag::AnyTag:
+      case RDTypeTag::VecDoubleTag:
+      case RDTypeTag::VecFloatTag:
+      case RDTypeTag::VecIntTag:
+      case RDTypeTag::VecUnsignedIntTag:
+      case RDTypeTag::VecStringTag:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  // Keep in sync with needsCleanup() above.
   void destroy() {
     switch (type) {
       case RDTypeTag::StringTag:
@@ -397,6 +413,11 @@ inline T rdvalue_cast(RDValue_cast_t v) {
     return std::any_cast<T>(*v.ptrCast<std::any>());
   }
   throw std::bad_any_cast();
+}
+
+template <>
+inline RDValue rdvalue_cast<RDValue>(RDValue_cast_t v) {
+  return v;
 }
 
 // POD casts
